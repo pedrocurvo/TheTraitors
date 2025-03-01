@@ -5,12 +5,79 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
+# TODO: Keep metrics and overall conversation
+# TODO: For each agent, keep all information in a folder/file, because their toughts are not shared with others
+# TODO: Include an introduction phase, like: Player 1. [PROFESSION] [ETHNICITY] [COUNTRY] [AGE] [CIVIL STATUS] [CHILDREN]
+# TODO: Write Paper 
+# TODO: README.md + Documentation
+
 class TraitorsGame:
-    def __init__(self, agent_count=10, traitor_count=3, model="deepseek-chat"):
-        # Use environment variable for API key
-        self.client = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"),
-                             base_url="https://api.deepseek.com")
+    def __init__(self, agent_count=10, traitor_count=3, model="deepseek-chat", seed=None, client_type="openai", provider=None):
+        """
+        Initialize the Traitors Game.
+        
+        Args:
+            agent_count: Number of total agents in the game
+            traitor_count: Number of traitors among the agents
+            model: Model name to use (depends on client_type)
+            seed: Random seed for reproducibility
+            client_type: Type of client to use ("openai", "hf")
+            provider: Provider for HF client (e.g., "together" for Together AI)
+        """
+        # Set random seed if provided
+        self.seed = seed
+        if seed is not None:
+            random.seed(seed)
+            print(f"Game initialized with seed: {seed}")
+        
+        # Initialize client based on type
+        self.client_type = client_type
         self.model = model
+        self.provider = provider
+
+        # Provider-specific settings
+        self.provider_settings = {
+            "deepseek": {
+                "api_key": os.getenv("DEEPSEEK_API_KEY"),
+                "base_url": "https://api.deepseek.com"
+            },
+            "openai": {
+                "api_key": os.getenv("OPENAI_API_KEY")
+            },
+            "together": {
+                "api_key": os.getenv("TOGETHER_API_KEY"),
+                "base_url": "https://api.together.xyz/v1"
+            }
+        }
+        
+        if client_type == "openai":
+            if self.provider == 'openai':
+                self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            elif self.provider in ['deepseek', 'together']:
+                self.client = OpenAI(api_key=self.provider_settings[self.provider]["api_key"],
+                                    base_url=self.provider_settings[self.provider]["base_url"])
+            else:
+                raise ValueError(f"Unsupported provider: {provider} for client type: {client_type}")
+        elif client_type == "hf":
+            try:
+                from huggingface_hub import InferenceClient
+                
+                # Initialize with provider-specific settings
+                if provider == "together":
+                    self.client = InferenceClient(
+                        provider="together",
+                        api_key=os.getenv("TOGETHER_API_KEY")
+                    )
+                    print("Using Together AI provider with Hugging Face client")
+                else:
+                    # Default HF client
+                    self.client = InferenceClient(token=os.getenv("HF_API_TOKEN"))
+                    print("Using standard Hugging Face Inference API")
+            except ImportError:
+                raise ImportError("Please install huggingface_hub package to use HF client")
+        else:
+            raise ValueError(f"Unsupported client type: {client_type}")
+        
         self.agents = self.create_agents(agent_count, traitor_count)
         self.game_over = False
         self.history = []  # Stores past discussions
@@ -80,16 +147,43 @@ class TraitorsGame:
         )
         
         try:
-            response = self.client.chat.completions.create(
-                model=agent["model"],
-                messages=[
-                    {"role": "system", "content": f"You are Player {agent['id']}. {role_description}\n\nYour memory: {agent_memory}"},
-                    {"role": "user", "content": formatted_prompt}
-                ],
-                stream=False
-            )
+            # Use appropriate client for API call
+            if self.client_type == "openai":
+                response = self.client.chat.completions.create(
+                    model=agent["model"],
+                    messages=[
+                        {"role": "system", "content": f"You are Player {agent['id']}. {role_description}\n\nYour memory: {agent_memory}"},
+                        {"role": "user", "content": formatted_prompt}
+                    ],
+                    stream=False
+                )
+                full_response = response.choices[0].message.content
             
-            full_response = response.choices[0].message.content
+            elif self.client_type == "hf":
+                # Hugging Face client implementation
+                system_message = f"You are Player {agent['id']}. {role_description}\n\nYour memory: {agent_memory}"
+                
+                if self.provider == "together":
+                    # Use chat_completion for Together AI provider
+                    response = self.client.chat_completion(
+                        model=agent["model"],
+                        messages=[
+                            {"role": "system", "content": system_message},
+                            {"role": "user", "content": formatted_prompt}
+                        ],
+                        temperature=0.7,
+                        max_tokens=500
+                    )
+                    full_response = response.choices[0].message.content
+                else:
+                    # Standard HF text generation
+                    full_response = self.client.text_generation(
+                        prompt=f"<s>[INST] <<SYS>>\n{system_message}\n<</SYS>>\n\n{formatted_prompt} [/INST]",
+                        model=agent["model"],
+                        max_new_tokens=500,
+                        temperature=0.7,
+                        top_p=0.9
+                    )
             
             # Extract only the content between --- markers
             import re
@@ -133,7 +227,7 @@ class TraitorsGame:
         active_agents = [a for a in self.agents if "eliminated" not in a]
         
         # First round of comments - each agent shares suspicions
-        for agent in active_agents:
+        for i, agent in enumerate(active_agents):
             game_status = self.get_game_status()
             agent["current_prompt"] = (
                 f"{game_status}\n\n"
@@ -141,6 +235,10 @@ class TraitorsGame:
                 "Who do you suspect and why? Be strategic based on your role. "
                 "Consider past eliminations and discussions."
             )
+
+            if self.round_number == 1:
+                agent["current_prompt"] += "\n\nThis is the first round of discussions, therefore you still don't have"
+                "any information about players who haven't spoken yet."
             
             if new_discussions:
                 agent["current_prompt"] += f"\n\nCurrent discussion: {' '.join(new_discussions)}"
@@ -368,6 +466,10 @@ class TraitorsGame:
         """Main game loop."""
         print("\n===== THE TRAITORS GAME =====")
         print(f"Starting with {len(self.agents)} players, including {sum(1 for a in self.agents if a['role'] == 'Traitor')} traitors")
+        if self.seed is not None:
+            print(f"Game seed: {self.seed}")
+        print(f"Using client: {self.client_type}" + (f" with provider: {self.provider}" if self.provider else ""))
+        print(f"Model: {self.model}")
         
         try:
             while not self.game_over:
@@ -395,5 +497,28 @@ class TraitorsGame:
 
 # Example usage
 if __name__ == "__main__":
-    game = TraitorsGame(agent_count=10, traitor_count=3, model="deepseek-chat")
+    # Use command line arguments to configure the game
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Run a Traitors Game simulation with AI agents")
+    parser.add_argument("--agents", type=int, default=10, help="Number of agents in the game")
+    parser.add_argument("--traitors", type=int, default=3, help="Number of traitor agents")
+    parser.add_argument("--model", type=str, default="deepseek-chat", help="Model name to use")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
+    parser.add_argument("--client", type=str, choices=["openai", "hf"], default="openai", 
+                        help="Client type (openai or hf for Hugging Face)")
+    parser.add_argument("--provider", type=str, default="deepseek", choices=["deepseek", "openai", "together"], 
+                        help="Provider for HF client (e.g., 'together' for Together AI)")
+    
+    args = parser.parse_args()
+    
+    # Create and run the game with the specified parameters
+    game = TraitorsGame(
+        agent_count=args.agents,
+        traitor_count=args.traitors,
+        model=args.model,
+        seed=args.seed,
+        client_type=args.client,
+        provider=args.provider
+    )
     game.run()
