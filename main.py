@@ -1,11 +1,14 @@
 import random
 from openai import OpenAI
 import os
+# dot env
+from dotenv import load_dotenv
+load_dotenv()
 
 class TraitorsGame:
     def __init__(self, agent_count=10, traitor_count=3, model="deepseek-chat"):
         # Use environment variable for API key
-        self.client = OpenAI(os.getenv("DEEPSEEK_API_KEY"),
+        self.client = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"),
                              base_url="https://api.deepseek.com")
         self.model = model
         self.agents = self.create_agents(agent_count, traitor_count)
@@ -72,6 +75,8 @@ class TraitorsGame:
             "Your in-game dialogue here\n"
             "---\n"
             "Keep your response brief (50-100 words). Only the text between the triple dashes will be shown to other players."
+            "Main Task: What would you say next in the group chat? "
+            "Ensure the conversation flows naturally and avoids repetition.\n\n"
         )
         
         try:
