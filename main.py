@@ -272,10 +272,14 @@ class TraitorsGame:
             else:
                 # If no markers found, use the whole response but add a note
                 print(f"Warning: Agent {agent['id']} didn't use the requested format")
+                with open(self.HISTORY_FILE, "a") as f:
+                    print(f"Warning: Agent {agent['id']} didn't use the requested format", file=f)
                 return full_response
 
         except Exception as e:
             print(f"Error calling the LLM API: {e}")
+            with open(self.HISTORY_FILE, "a") as f:
+                print(f"Error calling the LLM API: {e}", file=f)
             return f"Agent {agent['id']} couldn't respond due to an error."
 
     def get_game_status(self):
@@ -295,6 +299,8 @@ class TraitorsGame:
     def discussion_phase(self):
         """Agents communicate and discuss who to vote out."""
         print(f"\n--- DISCUSSION PHASE (ROUND {self.round_number}) ---")
+        with open(self.HISTORY_FILE, "a") as f:
+            print(f"\n--- DISCUSSION PHASE (ROUND {self.round_number}) ---", file=f)
         new_discussions = []
 
         # Add info about last elimination by traitors if any
@@ -327,18 +333,22 @@ class TraitorsGame:
             response = self.call_llm(agent)
             new_discussions.append(f"Player {agent['id']}: {response}")
             print(new_discussions[-1])
+            with open(self.HISTORY_FILE, "a") as f:
+                print(new_discussions[-1], file=f)
 
         # Second round - reactions to other agents' comments
         reaction_discussions = []
         for agent in active_agents:
             agent["current_prompt"] = (
                 "After hearing everyone's suspicions, what is your response? "
-                f"Discussion so far: {' '.join(new_discussions)}"
+                f"\n\nDiscussion so far: {' '.join(new_discussions)}"
             )
 
             response = self.call_llm(agent)
             reaction_discussions.append(f"Player {agent['id']} responds: {response}")
             print(reaction_discussions[-1])
+            with open(self.HISTORY_FILE, "a") as f:
+                print(reaction_discussions[-1], file=f)
 
         # Combine all discussions
         all_discussions = new_discussions + reaction_discussions
@@ -359,6 +369,8 @@ class TraitorsGame:
     def voting_phase(self):
         """Agents vote to eliminate a player."""
         print(f"\n--- VOTING PHASE (ROUND {self.round_number}) ---")
+        with open(self.HISTORY_FILE, "a") as f:
+            print(f"\n--- VOTING PHASE (ROUND {self.round_number}) ---", file=f)
         votes = {}
         active_agents = [a for a in self.agents if "eliminated" not in a]
 
@@ -382,6 +394,8 @@ class TraitorsGame:
                 vote = vote_match.group()
                 votes[vote] = votes.get(vote, 0) + 1
                 print(f"Player {agent['id']} votes for Player {vote}")
+                with open(self.HISTORY_FILE, "a") as f:
+                    print(f"Player {agent['id']} votes for Player {vote}", file=f)
 
                 # Add the vote to the list
                 votes_list.append(
@@ -396,6 +410,8 @@ class TraitorsGame:
                 )
             else:
                 print(f"Player {agent['id']} cast an invalid vote: {vote_response}")
+                with open(self.HISTORY_FILE, "a") as f:
+                    print(f"Player {agent['id']} cast an invalid vote: {vote_response}", file=f)
 
                 # Add the invalid vote to the list
                 votes_list.append(
@@ -411,6 +427,8 @@ class TraitorsGame:
 
         if not votes:
             print("No valid votes were cast!")
+            with open(self.HISTORY_FILE, "a") as f:
+                print("No valid votes were cast!", file=f)
             return
 
         # Find the agent with the most votes
@@ -432,8 +450,10 @@ class TraitorsGame:
 
         if eliminated_agent:
             eliminated_agent["eliminated"] = True
-            elimination_message = f"Player {eliminated} was eliminated. They were a {eliminated_agent['role']}."
+            elimination_message = f"Player {eliminated} was eliminated. Player {eliminated} was a {eliminated_agent['role']}."
             print(elimination_message)
+            with open(self.HISTORY_FILE, "a") as f:
+                print(elimination_message, file=f)
             self.history.append(elimination_message)
 
             # Add to each agent's memory
@@ -446,6 +466,8 @@ class TraitorsGame:
     def post_elimination_discussion(self, eliminated):
         """Allow agents to discuss after elimination is revealed."""
         print("\n--- POST-ELIMINATION DISCUSSION ---")
+        with open(self.HISTORY_FILE, "a") as f:
+            print("\n--- POST-ELIMINATION DISCUSSION ---", file=f)
         eliminated_agent = next(
             (a for a in self.agents if str(a["id"]) == eliminated), None
         )
@@ -471,6 +493,8 @@ class TraitorsGame:
             response = self.call_llm(agent)
             discussion_prompts.append(f"Player {agent['id']}: {response}")
             print(discussion_prompts[-1])
+            with open(self.HISTORY_FILE, "a") as f:
+                print(discussion_prompts[-1], file=f)
 
         # Update memory for each agent
         for agent in active_agents:
@@ -514,6 +538,8 @@ class TraitorsGame:
             response = self.call_llm(traitor)
             traitor_discussion.append(f"Traitor {traitor['id']}: {response}")
             print(traitor_discussion[-1])
+            with open(self.HISTORY_FILE, "a") as f:
+                print(traitor_discussion[-1], file=f)
 
         # Second round for traitors to reach consensus
         consensus_discussion = []
@@ -528,6 +554,8 @@ class TraitorsGame:
                 f"Traitor {traitor['id']} concludes: {response}"
             )
             print(consensus_discussion[-1])
+            with open(self.HISTORY_FILE, "a") as f:
+                print(consensus_discussion[-1], file=f)
 
         # Update traitor memories
         traitor_memory = f"--- SECRET TRAITOR MEETING (ROUND {self.round_number}) ---\n"
@@ -541,6 +569,8 @@ class TraitorsGame:
     def traitor_elimination_phase(self, traitors, active_faithfuls):
         """Traitors vote to eliminate a Faithful."""
         print("\n--- TRAITOR ELIMINATION PHASE ---")
+        with open(self.HISTORY_FILE, "a") as f:
+            print("\n--- TRAITOR ELIMINATION PHASE ---", file=f)
 
         if not traitors or not active_faithfuls:
             return
@@ -566,6 +596,8 @@ class TraitorsGame:
                 vote = vote_match.group()
                 votes[vote] = votes.get(vote, 0) + 1
                 print(f"Traitor {traitor['id']} votes to eliminate Player {vote}")
+                with open(self.HISTORY_FILE, "a") as f:
+                    print(f"Traitor {traitor['id']} votes to eliminate Player {vote}", file=f)
 
                 # Add the vote to the list
                 votes_list.append(
@@ -580,6 +612,8 @@ class TraitorsGame:
                 )
             else:
                 print(f"Traitor {traitor['id']} cast an invalid vote: {vote_response}")
+                with open(self.HISTORY_FILE, "a") as f:
+                    print(f"Traitor {traitor['id']} cast an invalid vote: {vote_response}", file=f)
 
                 # Add the invalid vote to the list
                 votes_list.append(
@@ -595,6 +629,8 @@ class TraitorsGame:
 
         if not votes:
             print("No valid traitor votes were cast!")
+            with open(self.HISTORY_FILE, "a") as f:
+                print("No valid traitor votes were cast!", file=f)
             return
 
         # Find the agent with the most votes
@@ -620,6 +656,8 @@ class TraitorsGame:
                 f"Player {eliminated} was eliminated by the traitors in the night."
             )
             print(elimination_message)
+            with open(self.HISTORY_FILE, "a") as f:
+                print(elimination_message, file=f)
             self.history.append(elimination_message)
             self.traitors_last_eliminated = f"Moderator: Player {eliminated} was eliminated last night by the traitors."
 
@@ -638,13 +676,19 @@ class TraitorsGame:
         )
 
         print(f"\n--- GAME STATUS: {faithfuls} Faithfuls, {traitors} Traitors ---")
+        with open(self.HISTORY_FILE, "a") as f:
+            print(f"\n--- GAME STATUS: {faithfuls} Faithfuls, {traitors} Traitors ---", file=f)
 
         if traitors == 0:
             print("\n🎉 FAITHFULS WIN! All traitors have been eliminated.")
+            with open(self.HISTORY_FILE, "a") as f:
+                print("\n🎉 FAITHFULS WIN! All traitors have been eliminated.", file=f)
             self.game_over = True
             return "Faithfuls"
         elif traitors >= faithfuls:
             print("\n💀 TRAITORS WIN! They now equal or outnumber the Faithfuls.")
+            with open(self.HISTORY_FILE, "a") as f:
+                print("\n💀 TRAITORS WIN! They now equal or outnumber the Faithfuls.", file=f)
             self.game_over = True
             return "Traitors"
         return None
@@ -655,13 +699,28 @@ class TraitorsGame:
         print(
             f"Starting with {len(self.agents)} players, including {sum(1 for a in self.agents if a['role'] == 'Traitor')} traitors"
         )
+        with open(self.HISTORY_FILE, "w") as f:
+            f.write("===== THE TRAITORS GAME =====\n\n")
+            f.write(
+                f"Starting with {len(self.agents)} players, including {sum(1 for a in self.agents if a['role'] == 'Traitor')} traitors\n\n"
+            )
+
         if self.seed is not None:
             print(f"Game seed: {self.seed}")
+            with open(self.HISTORY_FILE, "a") as f:
+                print(f"Game seed: {self.seed}", file=f)
         print(
             f"Using client: {self.client_type}"
             + (f" with provider: {self.provider}" if self.provider else "")
         )
+        with open(self.HISTORY_FILE, "a") as f:
+            print(
+                f"Using client: {self.client_type}"
+                + (f" with provider: {self.provider}" if self.provider else ""), file=f
+            )
         print(f"Model: {self.model}")
+        with open(self.HISTORY_FILE, "a") as f:
+            print(f"Model: {self.model}", file=f)
 
         try:
             while not self.game_over:
@@ -677,7 +736,11 @@ class TraitorsGame:
 
             # Game summary
             print("\n===== GAME SUMMARY =====")
+            with open(self.HISTORY_FILE, "a") as f:
+                print("\n===== GAME SUMMARY =====", file=f)
             print(f"The game lasted {self.round_number} rounds")
+            with open(self.HISTORY_FILE, "a") as f:
+                print(f"The game lasted {self.round_number} rounds", file=f)
             print(
                 "Traitors were:",
                 ", ".join(
@@ -700,11 +763,48 @@ class TraitorsGame:
                     if "eliminated" not in a
                 ),
             )
+            with open(self.HISTORY_FILE, "a") as f:
+                print(
+                    "Traitors were:",
+                    ", ".join(
+                        f"Player {a['id']}" for a in self.agents if a["role"] == "Traitor"
+                    ),
+                    file=f,
+                )
+                print(
+                    "Eliminated agents:",
+                    ", ".join(
+                        f"Player {a['id']} ({a['role']})"
+                        for a in self.agents
+                        if "eliminated" in a
+                    ),
+                    file=f,
+                )
+                print(
+                    "Survivors:",
+                    ", ".join(
+                        f"Player {a['id']} ({a['role']})"
+                        for a in self.agents
+                        if "eliminated" not in a
+                    ),
+                    file=f,
+                )
 
         except KeyboardInterrupt:
             print("\nGame interrupted by user.")
+            with open(self.HISTORY_FILE, "a") as f:
+                print("\nGame interrupted by user.", file=f)
         except Exception as e:
             print(f"Game error: {e}")
+            with open(self.HISTORY_FILE, "a") as f:
+                print(f"Game error: {e}", file=f)
+
+    def post_game_analysis(self):
+        """Compute game metrics and write to a file."""
+        metrics = compute_traitors_game_metrics(csv_file=self.VOTING_FILE)
+        with open(f"{self.RESULTS_DIR}/metrics.txt", "w") as f:
+            for key, value in metrics.items():
+                f.write(f"{key}: {value}\n")
 
 
 # Example usage
@@ -761,3 +861,4 @@ if __name__ == "__main__":
         experiment_name=args.experiment_name,
     )
     game.run()
+    game.post_game_analysis()
