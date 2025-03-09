@@ -25,11 +25,13 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install coverage
+        # Install any missing dependencies that might be needed for tests
+        pip install pytest pytest-cov
     
     - name: Run tests with coverage
       run: |
         python tests/run_tests.py --coverage
+      continue-on-error: false
     
     - name: Generate coverage report
       run: |
