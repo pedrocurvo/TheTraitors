@@ -1,5 +1,6 @@
 import os
 import random
+import time
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -101,6 +102,14 @@ class TraitorsGame:
                 raise ValueError(
                     f"Unsupported provider: {provider} for client type: {client_type}"
                 )
+        elif client_type == "mlx":
+            try:
+                from MLXChatClient import MLXChatClient
+
+                self.client = MLXChatClient()
+                print("Using MLX client")
+            except ImportError:
+                raise ImportError("Please install the MLX package to use MLX client")
         elif client_type == "hf":
             try:
                 from huggingface_hub import InferenceClient
@@ -156,9 +165,14 @@ class TraitorsGame:
             raise ValueError("Traitor count must be less than agent count")
 
         agents = [
-            {"id": i, "role": "Faithful", "memory": "", "model": self.model}
+            {"id": i, "role": "Faithful", "memory": "", "model": self.model, "path": None}
             for i in range(agent_count)
         ]
+
+        # Create a path for each agent
+        for agent in agents:
+            agent["path"] = f"{self.RESULTS_DIR}/agent-{agent['id']}"
+            Path(agent["path"]).mkdir(parents=True, exist_ok=True)
 
         # Assign traitor roles
         traitors = random.sample(agents, traitor_count)
@@ -214,6 +228,7 @@ class TraitorsGame:
             "---\n"
             "Your in-game dialogue here\n"
             "---\n"
+            "Keep the taughts outside the triple dashes.\n\n"
             "Keep your response brief (50-100 words). Only the text between the triple dashes will be shown to other players."
             "Main Task: What would you say next in the group chat? "
             "Ensure the conversation flows naturally and avoids repetition.\n\n"
@@ -234,6 +249,20 @@ class TraitorsGame:
                     stream=False,
                 )
                 full_response = response.choices[0].message.content
+            
+            elif self.client_type == "mlx":
+                response = self.client.create(
+                    model=agent["model"],
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": f"You are Player {agent['id']}. {role_description}\n\nYour memory: {agent_memory}",
+                        },
+                        {"role": "user", "content": formatted_prompt},
+                    ],
+                    stream=False,
+                )
+                full_response = response["choices"][0]["message"]["content"]
 
             elif self.client_type == "hf":
                 # Hugging Face client implementation
@@ -264,8 +293,18 @@ class TraitorsGame:
             # Extract only the content between --- markers
             import re
 
+            # Put the full response in a file under agent's path
+            file = f"{agent['path']}/inner-toughts.txt"
+            if os.path.exists(file):
+                with open(file, "a") as f:
+                    print(full_response, file=f)
+            else:
+                with open(file, "w") as f:
+                    print(full_response, file=f)
+
             pattern = r"---\s*([\s\S]*?)\s*---"
             match = re.search(pattern, full_response)
+
 
             if match:
                 return match.group(1).strip()
@@ -695,6 +734,8 @@ class TraitorsGame:
 
     def run(self):
         """Main game loop."""
+        # Start a timer
+        start_time = time.time()
         print("\n===== THE TRAITORS GAME =====")
         print(
             f"Starting with {len(self.agents)} players, including {sum(1 for a in self.agents if a['role'] == 'Traitor')} traitors"
@@ -734,10 +775,16 @@ class TraitorsGame:
 
                 self.round_number += 1
 
+            # End timer
+            end_time = time.time()
+
             # Game summary
             print("\n===== GAME SUMMARY =====")
             with open(self.HISTORY_FILE, "a") as f:
                 print("\n===== GAME SUMMARY =====", file=f)
+            print(f"The game simulation took {end_time - start_time:.2f} seconds")
+            with open(self.HISTORY_FILE, "a") as f:
+                print(f"The game simulation took {end_time - start_time:.2f} seconds", file=f)    
             print(f"The game lasted {self.round_number} rounds")
             with open(self.HISTORY_FILE, "a") as f:
                 print(f"The game lasted {self.round_number} rounds", file=f)
@@ -830,7 +877,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--client",
         type=str,
-        choices=["openai", "hf"],
+        choices=["openai", "hf", "mlx"],
         default="openai",
         help="Client type (openai or hf for Hugging Face)",
     )
