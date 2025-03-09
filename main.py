@@ -3,12 +3,13 @@ import random
 import time
 
 from dotenv import load_dotenv
-from openai import OpenAI
-
-load_dotenv()
 from pathlib import Path
 
+load_dotenv()
+
 from utils import compute_traitors_game_metrics
+from agent import Agent  # Import the Agent class
+from llm_client import LLMClientFactory  # Import the LLM client factory
 
 # TODO: Keep metrics and overall conversation
 # TODO: For each agent, keep all information in a folder/file, because their toughts are not shared with others
@@ -17,6 +18,7 @@ from utils import compute_traitors_game_metrics
 # TODO: Write Paper
 # TODO: README.md + Documentation
 # TODO: MULTIAGENTS (?)
+# TODO: Game through a config file
 
 
 class TraitorsGame:
@@ -55,174 +57,121 @@ class TraitorsGame:
             self.RESULTS_DIR = Path(f"results/{model}")
 
         # Now append a dir with run-number of run based on the number of directories in the model folder
-        run_number = len(
-            [
-                name
-                for name in os.listdir(self.RESULTS_DIR)
-                if os.path.isdir(os.path.join(self.RESULTS_DIR, name))
-            ]
+        run_number = (
+            sum(
+                [
+                    1
+                    for name in os.listdir(self.RESULTS_DIR)
+                    if os.path.isdir(os.path.join(self.RESULTS_DIR, name))
+                ]
+            )
+            + 1
         )
         # Create a new directory for the run
         Path(f"{self.RESULTS_DIR}/run-{run_number}").mkdir(parents=True, exist_ok=True)
         self.RESULTS_DIR = Path(f"{self.RESULTS_DIR}/run-{run_number}")
         print(f"Results will be saved in: {self.RESULTS_DIR}")
+
         # Set random seed if provided
         self.seed = seed
         if seed is not None:
             random.seed(seed)
             print(f"Game initialized with seed: {seed}")
 
-        # Initialize client based on type
-        self.client_type = client_type
+        # Store model and client configuration (for agent creation)
         self.model = model
+        self.client_type = client_type
         self.provider = provider
 
-        # Provider-specific settings
-        self.provider_settings = {
-            "deepseek": {
-                "api_key": os.getenv("DEEPSEEK_API_KEY"),
-                "base_url": "https://api.deepseek.com",
-            },
-            "openai": {"api_key": os.getenv("OPENAI_API_KEY")},
-            "together": {
-                "api_key": os.getenv("TOGETHER_API_KEY"),
-                "base_url": "https://api.together.xyz/v1",
-            },
-        }
-
-        if client_type == "openai":
-            if self.provider == "openai":
-                self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            elif self.provider in ["deepseek", "together"]:
-                self.client = OpenAI(
-                    api_key=self.provider_settings[self.provider]["api_key"],
-                    base_url=self.provider_settings[self.provider]["base_url"],
-                )
-            else:
-                raise ValueError(
-                    f"Unsupported provider: {provider} for client type: {client_type}"
-                )
-        elif client_type == "mlx":
-            try:
-                from MLXChatClient import MLXChatClient
-
-                self.client = MLXChatClient()
-                print("Using MLX client")
-            except ImportError:
-                raise ImportError("Please install the MLX package to use MLX client")
-        elif client_type == "hf":
-            try:
-                from huggingface_hub import InferenceClient
-
-                # Initialize with provider-specific settings
-                if provider == "together":
-                    self.client = InferenceClient(
-                        provider="together", api_key=os.getenv("TOGETHER_API_KEY")
-                    )
-                    print("Using Together AI provider with Hugging Face client")
-                else:
-                    # Default HF client
-                    self.client = InferenceClient(token=os.getenv("HF_API_TOKEN"))
-                    print("Using standard Hugging Face Inference API")
-            except ImportError:
-                raise ImportError(
-                    "Please install huggingface_hub package to use HF client"
-                )
-        else:
-            raise ValueError(f"Unsupported client type: {client_type}")
-
+        # Create agents with their own LLM clients
         self.agents = self.create_agents(agent_count, traitor_count)
         self.game_over = False
         self.history = []  # Stores past discussions
         self.round_number = 1
         self.traitors_last_eliminated = None
 
-        # Write a .yaml file with the configurations for the experiment
-        with open(f"{self.RESULTS_DIR}/config.yaml", "w") as f:
-            f.write(f"agent_count: {agent_count}\n")
-            f.write(f"traitor_count: {traitor_count}\n")
-            f.write(f"model: {model}\n")
-            f.write(f"seed: {seed}\n")
-            f.write(f"client_type: {client_type}\n")
-            f.write(f"provider: {provider}\n")
-            # Write if agent is Traitor or Faithful
-            for agent in self.agents:
-                f.write(f"agent_{agent['id']}: {agent['role']}\n")
-
-            f.write("\n")
-
         # Create a .txt file to keep the game history
         self.HISTORY_FILE = f"{self.RESULTS_DIR}/history.txt"
+
+        # Write configuration files
+        self.write_config_file(
+            agent_count, traitor_count, model, seed, client_type, provider
+        )
 
         # Write a .csv file to keep votes and eliminations
         self.VOTING_FILE = f"{self.RESULTS_DIR}/votes.csv"
         with open(self.VOTING_FILE, "w") as f:
             f.write("Round,Vote_Type,Player_ID,Role,Vote_Target,Eliminated\n")
 
+    def write_config_file(
+        self, agent_count, traitor_count, model, seed, client_type, provider
+    ):
+        """Write game configuration to a YAML file.
+
+        Args:
+            agent_count (int): Number of agents in the game
+            traitor_count (int): Number of traitors among the agents
+            model (str): Model name used for LLM calls
+            seed (int): Random seed for reproducibility
+            client_type (str): Type of client used (openai, hf, mlx)
+            provider (str): Provider for the client
+        """
+        config_file = f"{self.RESULTS_DIR}/config.yaml"
+        with open(config_file, "w") as f:
+            f.write(f"agent_count: {agent_count}\n")
+            f.write(f"traitor_count: {traitor_count}\n")
+            f.write(f"model: {model}\n")
+            f.write(f"seed: {seed}\n")
+            f.write(f"client_type: {client_type}\n")
+            f.write(f"provider: {provider}\n")
+
+            # Write agent roles
+            f.write("\n# Agent roles\n")
+            for agent in self.agents:
+                f.write(f"agent_{agent.id}: {agent.role}\n")
+
+            f.write("\n")
+
+        self.write_to_history(f"Configuration written to {config_file}")
+
     def create_agents(self, agent_count, traitor_count):
         """Initialize agents with unique roles."""
         if traitor_count >= agent_count:
             raise ValueError("Traitor count must be less than agent count")
 
+        # Create all agents as Faithful initially
         agents = [
-            {"id": i, "role": "Faithful", "memory": "", "model": self.model, "path": None}
+            Agent(i, "Faithful", self.model, self.RESULTS_DIR)
             for i in range(agent_count)
         ]
-
-        # Create a path for each agent
-        for agent in agents:
-            agent["path"] = f"{self.RESULTS_DIR}/agent-{agent['id']}"
-            Path(agent["path"]).mkdir(parents=True, exist_ok=True)
 
         # Assign traitor roles
         traitors = random.sample(agents, traitor_count)
         for agent in traitors:
-            agent["role"] = "Traitor"
+            agent.role = "Traitor"
 
-        # Give each agent knowledge of other traitors if they are a traitor
+        # Give each traitor knowledge of other traitors
         for agent in agents:
-            if agent["role"] == "Traitor":
+            if agent.is_traitor():
                 traitor_ids = [
-                    t["id"]
-                    for t in agents
-                    if t["role"] == "Traitor" and t["id"] != agent["id"]
+                    t.id for t in agents if t.is_traitor() and t.id != agent.id
                 ]
-                agent["fellow_traitors"] = traitor_ids
+                agent.set_fellow_traitors(traitor_ids)
+
+            # Create and assign an LLM client for each agent
+            # Currently all agents use the same client type, but this could be customized
+            agent_client = LLMClientFactory.create_client(
+                self.client_type, agent.model, self.provider
+            )
+            agent.set_llm_client(agent_client)
 
         return agents
 
-    def get_role_prompt(self, agent):
-        """Generate the initial role-specific prompt for each agent."""
-        if agent["role"] == "Faithful":
-            return (
-                "You are a Faithful in The Traitors game.\n"
-                "Your goal is to find and eliminate all Traitors before they take over.\n"
-                "Engage in discussions, observe behavior, and vote wisely.\n"
-                "You do not know who the other Faithfuls are. Be cautious in your accusations.\n"
-                "Convince others to eliminate real Traitors and defend yourself if accused.\n"
-                "Faithfuls win if all Traitors are eliminated."
-            )
-        else:
-            fellow_traitors = agent.get("fellow_traitors", [])
-            return (
-                "You are a Traitor in The Traitors game.\n"
-                f"Your fellow Traitors are agents: {', '.join(map(str, fellow_traitors))}.\n"
-                "Your goal is to secretly eliminate the Faithfuls and avoid being discovered.\n"
-                "Pretend to be a Faithful and manipulate votes to eliminate innocent players.\n"
-                "Work together with fellow Traitors in secret.\n"
-                "Lie convincingly if accused and mislead the Faithfuls.\n"
-                "Traitors win if they outnumber or equal the Faithfuls."
-            )
-
     def call_llm(self, agent):
         """Call the LLM API to generate agent responses."""
-        role_description = self.get_role_prompt(agent)
-        agent_memory = agent.get("memory", "")
-        prompt = agent.get("current_prompt", "")
-
         # Add formatting instructions with delimiters
         formatted_prompt = (
-            f"{prompt}\n\n"
+            f"{agent.current_prompt}\n\n"
             "Important: First, decide what your character would say in this situation. "
             "Then provide ONLY your character's actual dialogue between triple dashes like this:\n"
             "---\n"
@@ -235,123 +184,54 @@ class TraitorsGame:
         )
 
         try:
-            # Use appropriate client for API call
-            if self.client_type == "openai":
-                response = self.client.chat.completions.create(
-                    model=agent["model"],
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": f"You are Player {agent['id']}. {role_description}\n\nYour memory: {agent_memory}",
-                        },
-                        {"role": "user", "content": formatted_prompt},
-                    ],
-                    stream=False,
-                )
-                full_response = response.choices[0].message.content
-            
-            elif self.client_type == "mlx":
-                response = self.client.create(
-                    model=agent["model"],
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": f"You are Player {agent['id']}. {role_description}\n\nYour memory: {agent_memory}",
-                        },
-                        {"role": "user", "content": formatted_prompt},
-                    ],
-                    stream=False,
-                )
-                full_response = response["choices"][0]["message"]["content"]
-
-            elif self.client_type == "hf":
-                # Hugging Face client implementation
-                system_message = f"You are Player {agent['id']}. {role_description}\n\nYour memory: {agent_memory}"
-
-                if self.provider == "together":
-                    # Use chat_completion for Together AI provider
-                    response = self.client.chat_completion(
-                        model=agent["model"],
-                        messages=[
-                            {"role": "system", "content": system_message},
-                            {"role": "user", "content": formatted_prompt},
-                        ],
-                        temperature=0.7,
-                        max_tokens=500,
-                    )
-                    full_response = response.choices[0].message.content
-                else:
-                    # Standard HF text generation
-                    full_response = self.client.text_generation(
-                        prompt=f"<s>[INST] <<SYS>>\n{system_message}\n<</SYS>>\n\n{formatted_prompt} [/INST]",
-                        model=agent["model"],
-                        max_new_tokens=500,
-                        temperature=0.7,
-                        top_p=0.9,
-                    )
-
-            # Extract only the content between --- markers
-            import re
-
-            # Put the full response in a file under agent's path
-            file = f"{agent['path']}/inner-toughts.txt"
-            if os.path.exists(file):
-                with open(file, "a") as f:
-                    print(full_response, file=f)
-            else:
-                with open(file, "w") as f:
-                    print(full_response, file=f)
-
-            pattern = r"---\s*([\s\S]*?)\s*---"
-            match = re.search(pattern, full_response)
-
-
-            if match:
-                return match.group(1).strip()
-            else:
-                # If no markers found, use the whole response but add a note
-                print(f"Warning: Agent {agent['id']} didn't use the requested format")
-                with open(self.HISTORY_FILE, "a") as f:
-                    print(f"Warning: Agent {agent['id']} didn't use the requested format", file=f)
-                return full_response
-
+            # Use the agent's own LLM client to generate a response
+            return agent.call_llm(formatted_prompt)
         except Exception as e:
             print(f"Error calling the LLM API: {e}")
             with open(self.HISTORY_FILE, "a") as f:
                 print(f"Error calling the LLM API: {e}", file=f)
-            return f"Agent {agent['id']} couldn't respond due to an error."
+            return f"Agent {agent.id} couldn't respond due to an error."
 
     def get_game_status(self):
         """Return the current game status for prompts."""
-        active_agents = [a for a in self.agents if "eliminated" not in a]
-        eliminated_agents = [a for a in self.agents if "eliminated" in a]
+        active_agents = [a for a in self.agents if not a.is_eliminated()]
+        eliminated_agents = [a for a in self.agents if a.is_eliminated()]
 
         status = f"Round {self.round_number}: "
-        status += f"Active players: {', '.join(str(a['id']) for a in active_agents)}. "
+        status += f"Active players: {', '.join(str(a.id) for a in active_agents)}. "
 
         if eliminated_agents:
-            status += f"Eliminated players: {', '.join(str(a['id']) for a in eliminated_agents)}. "
+            status += f"Eliminated players: {', '.join(str(a.id) for a in eliminated_agents)}. "
 
         status += f"Game history: {' '.join(self.history)}"
         return status
 
+    def write_to_history(self, message, new_section=False):
+        """Write a message to the history file with optional section formatting."""
+        if new_section:
+            message = f"\n--- {message} ---"
+
+        print(message)
+        with open(self.HISTORY_FILE, "a") as f:
+            print(message, file=f)
+
     def discussion_phase(self):
         """Agents communicate and discuss who to vote out."""
-        print(f"\n--- DISCUSSION PHASE (ROUND {self.round_number}) ---")
-        with open(self.HISTORY_FILE, "a") as f:
-            print(f"\n--- DISCUSSION PHASE (ROUND {self.round_number}) ---", file=f)
+        self.write_to_history(
+            f"DISCUSSION PHASE (ROUND {self.round_number})", new_section=True
+        )
         new_discussions = []
 
         # Add info about last elimination by traitors if any
         if self.traitors_last_eliminated:
             new_discussions.append(self.traitors_last_eliminated)
 
-        active_agents = [a for a in self.agents if "eliminated" not in a]
+        active_agents = [a for a in self.agents if not a.is_eliminated()]
 
         # First round of comments - each agent shares suspicions
         for i, agent in enumerate(active_agents):
             game_status = self.get_game_status()
-            agent["current_prompt"] = (
+            agent.set_prompt(
                 f"{game_status}\n\n"
                 "You are in a room with other players to discuss who might be a traitor. "
                 "Who do you suspect and why? Be strategic based on your role. "
@@ -359,126 +239,122 @@ class TraitorsGame:
             )
 
             if self.round_number == 1:
-                agent[
-                    "current_prompt"
-                ] += "\n\nThis is the first round of discussions, therefore you still don't have"
+                agent.current_prompt += "\n\nThis is the first round of discussions, therefore you still don't have"
                 "any information about players who haven't spoken yet."
 
             if new_discussions:
-                agent[
-                    "current_prompt"
-                ] += f"\n\nCurrent discussion: {' '.join(new_discussions)}"
+                agent.current_prompt += (
+                    f"\n\nCurrent discussion: {' '.join(new_discussions)}"
+                )
 
             response = self.call_llm(agent)
-            new_discussions.append(f"Player {agent['id']}: {response}")
-            print(new_discussions[-1])
-            with open(self.HISTORY_FILE, "a") as f:
-                print(new_discussions[-1], file=f)
+            message = f"Player {agent.id}: {response}"
+            new_discussions.append(message)
+            self.write_to_history(message)
 
         # Second round - reactions to other agents' comments
         reaction_discussions = []
         for agent in active_agents:
-            agent["current_prompt"] = (
+            agent.set_prompt(
                 "After hearing everyone's suspicions, what is your response? "
                 f"\n\nDiscussion so far: {' '.join(new_discussions)}"
             )
 
             response = self.call_llm(agent)
-            reaction_discussions.append(f"Player {agent['id']} responds: {response}")
-            print(reaction_discussions[-1])
-            with open(self.HISTORY_FILE, "a") as f:
-                print(reaction_discussions[-1], file=f)
+            message = f"Player {agent.id} responds: {response}"
+            reaction_discussions.append(message)
+            self.write_to_history(message)
 
         # Combine all discussions
         all_discussions = new_discussions + reaction_discussions
 
         # Update memory for each agent
         for agent in active_agents:
-            agent["current_prompt"] = (
+            agent.set_prompt(
                 "Summarize the most important points from this discussion that you want to remember. "
                 f"Focus on who you believe are traitors and why: {' '.join(all_discussions)}"
             )
             memory_response = self.call_llm(agent)
+            agent.add_to_memory(memory_response, f"ROUND {self.round_number} MEMORY")
 
-            # Add timestamp to memory
-            agent[
-                "memory"
-            ] += f"\n--- ROUND {self.round_number} MEMORY ---\n{memory_response}\n"
-
-    def voting_phase(self):
-        """Agents vote to eliminate a player."""
-        print(f"\n--- VOTING PHASE (ROUND {self.round_number}) ---")
-        with open(self.HISTORY_FILE, "a") as f:
-            print(f"\n--- VOTING PHASE (ROUND {self.round_number}) ---", file=f)
-        votes = {}
-        active_agents = [a for a in self.agents if "eliminated" not in a]
-
-        # a list with dictionaries with the votes
-        votes_list = []
-
-        for agent in active_agents:
-            agent["current_prompt"] = (
-                f"Based on all discussions and your memory:\n{agent['memory']}\n\n"
-                f"It's time to vote. The active players are: {', '.join(str(a['id']) for a in active_agents)}.\n"
-                "Who are you voting to eliminate? Respond with ONLY the player number."
-            )
-
-            vote_response = self.call_llm(agent)
-
-            # Extract just the number from the response
-            import re
-
-            vote_match = re.search(r"\d+", vote_response)
-            if vote_match:
-                vote = vote_match.group()
-                votes[vote] = votes.get(vote, 0) + 1
-                print(f"Player {agent['id']} votes for Player {vote}")
-                with open(self.HISTORY_FILE, "a") as f:
-                    print(f"Player {agent['id']} votes for Player {vote}", file=f)
-
-                # Add the vote to the list
-                votes_list.append(
-                    {
-                        "Round": self.round_number,
-                        "Vote_Type": "General",
-                        "Player_ID": agent["id"],
-                        "Role": agent["role"],
-                        "Vote_Target": vote,
-                        "Eliminated": False,
-                    }
-                )
-            else:
-                print(f"Player {agent['id']} cast an invalid vote: {vote_response}")
-                with open(self.HISTORY_FILE, "a") as f:
-                    print(f"Player {agent['id']} cast an invalid vote: {vote_response}", file=f)
-
-                # Add the invalid vote to the list
-                votes_list.append(
-                    {
-                        "Round": self.round_number,
-                        "Vote_Type": "General",
-                        "Player_ID": agent["id"],
-                        "Role": agent["role"],
-                        "Vote_Target": None,
-                        "Eliminated": False,
-                    }
-                )
-
-        if not votes:
-            print("No valid votes were cast!")
-            with open(self.HISTORY_FILE, "a") as f:
-                print("No valid votes were cast!", file=f)
-            return
-
-        # Find the agent with the most votes
-        eliminated = max(votes, key=votes.get)
-        eliminated_agent = next(
-            (a for a in self.agents if str(a["id"]) == eliminated), None
+    def process_vote(self, agent, vote_type, active_players, votes_dict, votes_list):
+        """Process a vote from an agent and update tracking structures."""
+        agent.set_prompt(
+            f"Based on all discussions and your memory:\n{agent.memory}\n\n"
+            f"It's time to vote. The active players are: {', '.join(str(a.id) for a in active_players)}.\n"
+            "Who are you voting to eliminate? Respond with ONLY the player number."
         )
 
-        # Loop through the list and replace the eliminated in each dictionary
+        vote_response = self.call_llm(agent)
+
+        # Extract just the number from the response
+        import re
+
+        vote_match = re.search(r"\d+", vote_response)
+
+        if vote_match:
+            vote = vote_match.group()
+            votes_dict[vote] = votes_dict.get(vote, 0) + 1
+            self.write_to_history(f"Player {agent.id} votes for Player {vote}")
+
+            # Add the vote to the list
+            votes_list.append(
+                {
+                    "Round": self.round_number,
+                    "Vote_Type": vote_type,
+                    "Player_ID": agent.id,
+                    "Role": agent.role,
+                    "Vote_Target": vote,
+                    "Eliminated": False,
+                }
+            )
+            return vote
+        else:
+            self.write_to_history(
+                f"Player {agent.id} cast an invalid vote: {vote_response}"
+            )
+
+            # Add the invalid vote to the list
+            votes_list.append(
+                {
+                    "Round": self.round_number,
+                    "Vote_Type": vote_type,
+                    "Player_ID": agent.id,
+                    "Role": agent.role,
+                    "Vote_Target": None,
+                    "Eliminated": False,
+                }
+            )
+            return None
+
+    def process_elimination(
+        self, eliminated_id, eliminated_agent, votes_list, elimination_type="vote"
+    ):
+        """Process the elimination of an agent."""
+        if not eliminated_agent:
+            return False
+
+        eliminated_agent.eliminate()
+
+        if elimination_type == "vote":
+            elimination_message = f"Player {eliminated_id} was eliminated. Player {eliminated_id} was a {eliminated_agent.role}."
+        else:  # traitor elimination
+            elimination_message = (
+                f"Player {eliminated_id} was eliminated by the traitors in the night."
+            )
+            self.traitors_last_eliminated = f"Moderator: Player {eliminated_id} was eliminated last night by the traitors."
+
+        self.write_to_history(elimination_message)
+        self.history.append(elimination_message)
+
+        # Update all active agents' memory
+        for agent in self.agents:
+            if not agent.is_eliminated():
+                agent.add_to_memory(elimination_message)
+
+        # Update votes_list with the eliminated player
         for vote in votes_list:
-            vote["Eliminated"] = eliminated
+            vote["Eliminated"] = eliminated_id
 
         # Write the votes to the .csv file
         with open(self.VOTING_FILE, "a") as f:
@@ -487,247 +363,175 @@ class TraitorsGame:
                     f"{vote['Round']},{vote['Vote_Type']},{vote['Player_ID']},{vote['Role']},{vote['Vote_Target']},{vote['Eliminated']}\n"
                 )
 
-        if eliminated_agent:
-            eliminated_agent["eliminated"] = True
-            elimination_message = f"Player {eliminated} was eliminated. Player {eliminated} was a {eliminated_agent['role']}."
-            print(elimination_message)
-            with open(self.HISTORY_FILE, "a") as f:
-                print(elimination_message, file=f)
-            self.history.append(elimination_message)
+        return True
 
-            # Add to each agent's memory
-            for agent in active_agents:
-                if "eliminated" not in agent:
-                    agent["memory"] += f"\n{elimination_message}\n"
+    def voting_phase(self):
+        """Agents vote to eliminate a player."""
+        self.write_to_history(
+            f"VOTING PHASE (ROUND {self.round_number})", new_section=True
+        )
+        votes = {}
+        active_agents = [a for a in self.agents if not a.is_eliminated()]
+        votes_list = []
 
-            self.post_elimination_discussion(eliminated)
+        for agent in active_agents:
+            self.process_vote(agent, "General", active_agents, votes, votes_list)
+
+        if not votes:
+            self.write_to_history("No valid votes were cast!")
+            return
+
+        # Find the agent with the most votes
+        eliminated_id = max(votes, key=votes.get)
+        eliminated_agent = next(
+            (a for a in self.agents if str(a.id) == eliminated_id), None
+        )
+
+        if self.process_elimination(eliminated_id, eliminated_agent, votes_list):
+            self.post_elimination_discussion(eliminated_id)
 
     def post_elimination_discussion(self, eliminated):
         """Allow agents to discuss after elimination is revealed."""
-        print("\n--- POST-ELIMINATION DISCUSSION ---")
-        with open(self.HISTORY_FILE, "a") as f:
-            print("\n--- POST-ELIMINATION DISCUSSION ---", file=f)
+        self.write_to_history("POST-ELIMINATION DISCUSSION", new_section=True)
         eliminated_agent = next(
-            (a for a in self.agents if str(a["id"]) == eliminated), None
+            (a for a in self.agents if str(a.id) == eliminated), None
         )
 
         if not eliminated_agent:
             return
 
         discussion_prompts = []
-        active_agents = [a for a in self.agents if "eliminated" not in a]
+        active_agents = [a for a in self.agents if not a.is_eliminated()]
 
         for agent in active_agents:
-            agent["current_prompt"] = (
-                f"Player {eliminated} was eliminated and was a {eliminated_agent['role']}. "
+            agent.set_prompt(
+                f"Player {eliminated} was eliminated and was a {eliminated_agent.role}. "
                 "What are your thoughts on this elimination? Has this changed your suspicions? "
                 "Be strategic based on your role."
             )
 
             if discussion_prompts:
-                agent[
-                    "current_prompt"
-                ] += f"\n\nOngoing discussion: {' '.join(discussion_prompts)}"
+                agent.current_prompt += (
+                    f"\n\nOngoing discussion: {' '.join(discussion_prompts)}"
+                )
 
             response = self.call_llm(agent)
-            discussion_prompts.append(f"Player {agent['id']}: {response}")
-            print(discussion_prompts[-1])
-            with open(self.HISTORY_FILE, "a") as f:
-                print(discussion_prompts[-1], file=f)
+            message = f"Player {agent.id}: {response}"
+            discussion_prompts.append(message)
+            self.write_to_history(message)
 
         # Update memory for each agent
         for agent in active_agents:
-            agent["current_prompt"] = (
+            agent.set_prompt(
                 f"Summarize key insights from this post-elimination discussion: {' '.join(discussion_prompts)}"
             )
             memory_response = self.call_llm(agent)
-            agent[
-                "memory"
-            ] += f"\n--- POST-ELIMINATION INSIGHTS ---\n{memory_response}\n"
+            agent.add_to_memory(memory_response, "POST-ELIMINATION INSIGHTS")
 
     def traitor_discussion_phase(self):
         """Traitors secretly discuss who to eliminate."""
-        print("\n--- TRAITOR DISCUSSION PHASE ---")
+        self.write_to_history("TRAITOR DISCUSSION PHASE", new_section=True)
         traitors = [
             agent
             for agent in self.agents
-            if agent["role"] == "Traitor" and "eliminated" not in agent
+            if agent.is_traitor() and not agent.is_eliminated()
         ]
 
         if not traitors:
             return
 
         active_faithfuls = [
-            a for a in self.agents if a["role"] == "Faithful" and "eliminated" not in a
+            a for a in self.agents if a.is_faithful() and not a.is_eliminated()
         ]
 
         traitor_discussion = []
         for traitor in traitors:
-            traitor["current_prompt"] = (
-                f"SECRET TRAITOR MEETING: You are with your fellow traitors: {', '.join(str(t['id']) for t in traitors)}.\n"
-                f"The Faithfuls still in the game are: {', '.join(str(a['id']) for a in active_faithfuls)}.\n"
+            traitor.set_prompt(
+                f"SECRET TRAITOR MEETING: You are with your fellow traitors: {', '.join(str(t.id) for t in traitors)}.\n"
+                f"The Faithfuls still in the game are: {', '.join(str(a.id) for a in active_faithfuls)}.\n"
                 "Who do you suggest eliminating next and why? Be strategic to avoid detection."
             )
 
             if traitor_discussion:
-                traitor[
-                    "current_prompt"
-                ] += f"\n\nTraitor discussion so far: {' '.join(traitor_discussion)}"
+                traitor.current_prompt += (
+                    f"\n\nTraitor discussion so far: {' '.join(traitor_discussion)}"
+                )
 
             response = self.call_llm(traitor)
-            traitor_discussion.append(f"Traitor {traitor['id']}: {response}")
-            print(traitor_discussion[-1])
-            with open(self.HISTORY_FILE, "a") as f:
-                print(traitor_discussion[-1], file=f)
+            message = f"Traitor {traitor.id}: {response}"
+            traitor_discussion.append(message)
+            self.write_to_history(message)
 
         # Second round for traitors to reach consensus
         consensus_discussion = []
         for traitor in traitors:
-            traitor["current_prompt"] = (
+            traitor.set_prompt(
                 "Based on the traitor discussion, who do you now think we should eliminate? "
                 f"Discussion: {' '.join(traitor_discussion)}"
             )
 
             response = self.call_llm(traitor)
-            consensus_discussion.append(
-                f"Traitor {traitor['id']} concludes: {response}"
-            )
-            print(consensus_discussion[-1])
-            with open(self.HISTORY_FILE, "a") as f:
-                print(consensus_discussion[-1], file=f)
+            message = f"Traitor {traitor.id} concludes: {response}"
+            consensus_discussion.append(message)
+            self.write_to_history(message)
 
         # Update traitor memories
-        traitor_memory = f"--- SECRET TRAITOR MEETING (ROUND {self.round_number}) ---\n"
-        traitor_memory += " ".join(traitor_discussion + consensus_discussion)
-
+        traitor_memory = " ".join(traitor_discussion + consensus_discussion)
         for traitor in traitors:
-            traitor["memory"] += f"\n{traitor_memory}\n"
+            traitor.add_to_memory(
+                traitor_memory, f"SECRET TRAITOR MEETING (ROUND {self.round_number})"
+            )
 
         self.traitor_elimination_phase(traitors, active_faithfuls)
 
     def traitor_elimination_phase(self, traitors, active_faithfuls):
         """Traitors vote to eliminate a Faithful."""
-        print("\n--- TRAITOR ELIMINATION PHASE ---")
-        with open(self.HISTORY_FILE, "a") as f:
-            print("\n--- TRAITOR ELIMINATION PHASE ---", file=f)
+        self.write_to_history("TRAITOR ELIMINATION PHASE", new_section=True)
 
         if not traitors or not active_faithfuls:
             return
 
-        # a list with dictionaries with the votes
+        votes = {}
         votes_list = []
 
-        votes = {}
         for traitor in traitors:
-            traitor["current_prompt"] = (
-                "Based on the traitor discussion, which Faithful do you vote to eliminate tonight? "
-                f"The Faithfuls are: {', '.join(str(a['id']) for a in active_faithfuls)}. "
-                "Respond with ONLY the player number."
-            )
-
-            vote_response = self.call_llm(traitor)
-
-            # Extract just the number
-            import re
-
-            vote_match = re.search(r"\d+", vote_response)
-            if vote_match:
-                vote = vote_match.group()
-                votes[vote] = votes.get(vote, 0) + 1
-                print(f"Traitor {traitor['id']} votes to eliminate Player {vote}")
-                with open(self.HISTORY_FILE, "a") as f:
-                    print(f"Traitor {traitor['id']} votes to eliminate Player {vote}", file=f)
-
-                # Add the vote to the list
-                votes_list.append(
-                    {
-                        "Round": self.round_number,
-                        "Vote_Type": "Traitor",
-                        "Player_ID": traitor["id"],
-                        "Role": traitor["role"],
-                        "Vote_Target": vote,
-                        "Eliminated": False,
-                    }
-                )
-            else:
-                print(f"Traitor {traitor['id']} cast an invalid vote: {vote_response}")
-                with open(self.HISTORY_FILE, "a") as f:
-                    print(f"Traitor {traitor['id']} cast an invalid vote: {vote_response}", file=f)
-
-                # Add the invalid vote to the list
-                votes_list.append(
-                    {
-                        "Round": self.round_number,
-                        "Vote_Type": "Traitor",
-                        "Player_ID": traitor["id"],
-                        "Role": traitor["role"],
-                        "Vote_Target": None,
-                        "Eliminated": False,
-                    }
-                )
+            self.process_vote(traitor, "Traitor", active_faithfuls, votes, votes_list)
 
         if not votes:
-            print("No valid traitor votes were cast!")
-            with open(self.HISTORY_FILE, "a") as f:
-                print("No valid traitor votes were cast!", file=f)
+            self.write_to_history("No valid traitor votes were cast!")
             return
 
         # Find the agent with the most votes
-        eliminated = max(votes, key=votes.get)
+        eliminated_id = max(votes, key=votes.get)
         eliminated_agent = next(
-            (a for a in active_faithfuls if str(a["id"]) == eliminated), None
+            (a for a in active_faithfuls if str(a.id) == eliminated_id), None
         )
 
-        # Loop through the list and replace the eliminated in each dictionary
-        for vote in votes_list:
-            vote["Eliminated"] = eliminated
-
-        # Write the votes to the .csv file
-        with open(self.VOTING_FILE, "a") as f:
-            for vote in votes_list:
-                f.write(
-                    f"{vote['Round']},{vote['Vote_Type']},{vote['Player_ID']},{vote['Role']},{vote['Vote_Target']},{vote['Eliminated']}\n"
-                )
-
-        if eliminated_agent:
-            eliminated_agent["eliminated"] = True
-            elimination_message = (
-                f"Player {eliminated} was eliminated by the traitors in the night."
-            )
-            print(elimination_message)
-            with open(self.HISTORY_FILE, "a") as f:
-                print(elimination_message, file=f)
-            self.history.append(elimination_message)
-            self.traitors_last_eliminated = f"Moderator: Player {eliminated} was eliminated last night by the traitors."
-
-            # Update all active agents' memory
-            for agent in self.agents:
-                if "eliminated" not in agent:
-                    agent["memory"] += f"\n{elimination_message}\n"
+        self.process_elimination(eliminated_id, eliminated_agent, votes_list, "traitor")
 
     def check_win_conditions(self):
         """Determine if the game has ended."""
         faithfuls = sum(
-            1 for a in self.agents if a["role"] == "Faithful" and "eliminated" not in a
+            1 for a in self.agents if a.is_faithful() and not a.is_eliminated()
         )
         traitors = sum(
-            1 for a in self.agents if a["role"] == "Traitor" and "eliminated" not in a
+            1 for a in self.agents if a.is_traitor() and not a.is_eliminated()
         )
 
-        print(f"\n--- GAME STATUS: {faithfuls} Faithfuls, {traitors} Traitors ---")
-        with open(self.HISTORY_FILE, "a") as f:
-            print(f"\n--- GAME STATUS: {faithfuls} Faithfuls, {traitors} Traitors ---", file=f)
+        self.write_to_history(
+            f"GAME STATUS: {faithfuls} Faithfuls, {traitors} Traitors", new_section=True
+        )
 
         if traitors == 0:
-            print("\n🎉 FAITHFULS WIN! All traitors have been eliminated.")
-            with open(self.HISTORY_FILE, "a") as f:
-                print("\n🎉 FAITHFULS WIN! All traitors have been eliminated.", file=f)
+            self.write_to_history(
+                "🎉 FAITHFULS WIN! All traitors have been eliminated."
+            )
             self.game_over = True
             return "Faithfuls"
         elif traitors >= faithfuls:
-            print("\n💀 TRAITORS WIN! They now equal or outnumber the Faithfuls.")
-            with open(self.HISTORY_FILE, "a") as f:
-                print("\n💀 TRAITORS WIN! They now equal or outnumber the Faithfuls.", file=f)
+            self.write_to_history(
+                "💀 TRAITORS WIN! They now equal or outnumber the Faithfuls."
+            )
             self.game_over = True
             return "Traitors"
         return None
@@ -736,32 +540,19 @@ class TraitorsGame:
         """Main game loop."""
         # Start a timer
         start_time = time.time()
-        print("\n===== THE TRAITORS GAME =====")
-        print(
-            f"Starting with {len(self.agents)} players, including {sum(1 for a in self.agents if a['role'] == 'Traitor')} traitors"
+        self.write_to_history("THE TRAITORS GAME", new_section=True)
+        self.write_to_history(
+            f"Starting with {len(self.agents)} players, including {sum(1 for a in self.agents if a.is_traitor())} traitors"
         )
-        with open(self.HISTORY_FILE, "w") as f:
-            f.write("===== THE TRAITORS GAME =====\n\n")
-            f.write(
-                f"Starting with {len(self.agents)} players, including {sum(1 for a in self.agents if a['role'] == 'Traitor')} traitors\n\n"
-            )
 
         if self.seed is not None:
-            print(f"Game seed: {self.seed}")
-            with open(self.HISTORY_FILE, "a") as f:
-                print(f"Game seed: {self.seed}", file=f)
-        print(
+            self.write_to_history(f"Game seed: {self.seed}")
+
+        self.write_to_history(
             f"Using client: {self.client_type}"
             + (f" with provider: {self.provider}" if self.provider else "")
         )
-        with open(self.HISTORY_FILE, "a") as f:
-            print(
-                f"Using client: {self.client_type}"
-                + (f" with provider: {self.provider}" if self.provider else ""), file=f
-            )
-        print(f"Model: {self.model}")
-        with open(self.HISTORY_FILE, "a") as f:
-            print(f"Model: {self.model}", file=f)
+        self.write_to_history(f"Model: {self.model}")
 
         try:
             while not self.game_over:
@@ -779,72 +570,36 @@ class TraitorsGame:
             end_time = time.time()
 
             # Game summary
-            print("\n===== GAME SUMMARY =====")
-            with open(self.HISTORY_FILE, "a") as f:
-                print("\n===== GAME SUMMARY =====", file=f)
-            print(f"The game simulation took {end_time - start_time:.2f} seconds")
-            with open(self.HISTORY_FILE, "a") as f:
-                print(f"The game simulation took {end_time - start_time:.2f} seconds", file=f)    
-            print(f"The game lasted {self.round_number} rounds")
-            with open(self.HISTORY_FILE, "a") as f:
-                print(f"The game lasted {self.round_number} rounds", file=f)
-            print(
-                "Traitors were:",
-                ", ".join(
-                    f"Player {a['id']}" for a in self.agents if a["role"] == "Traitor"
-                ),
+            self.write_to_history("GAME SUMMARY", new_section=True)
+            self.write_to_history(
+                f"The game simulation took {end_time - start_time:.2f} seconds"
             )
-            print(
-                "Eliminated agents:",
-                ", ".join(
-                    f"Player {a['id']} ({a['role']})"
+            self.write_to_history(f"The game lasted {self.round_number} rounds")
+            self.write_to_history(
+                "Traitors were: "
+                + ", ".join(f"Player {a.id}" for a in self.agents if a.is_traitor())
+            )
+            self.write_to_history(
+                "Eliminated agents: "
+                + ", ".join(
+                    f"Player {a.id} ({a.role})"
                     for a in self.agents
-                    if "eliminated" in a
-                ),
+                    if a.is_eliminated()
+                )
             )
-            print(
-                "Survivors:",
-                ", ".join(
-                    f"Player {a['id']} ({a['role']})"
+            self.write_to_history(
+                "Survivors: "
+                + ", ".join(
+                    f"Player {a.id} ({a.role})"
                     for a in self.agents
-                    if "eliminated" not in a
-                ),
+                    if not a.is_eliminated()
+                )
             )
-            with open(self.HISTORY_FILE, "a") as f:
-                print(
-                    "Traitors were:",
-                    ", ".join(
-                        f"Player {a['id']}" for a in self.agents if a["role"] == "Traitor"
-                    ),
-                    file=f,
-                )
-                print(
-                    "Eliminated agents:",
-                    ", ".join(
-                        f"Player {a['id']} ({a['role']})"
-                        for a in self.agents
-                        if "eliminated" in a
-                    ),
-                    file=f,
-                )
-                print(
-                    "Survivors:",
-                    ", ".join(
-                        f"Player {a['id']} ({a['role']})"
-                        for a in self.agents
-                        if "eliminated" not in a
-                    ),
-                    file=f,
-                )
 
         except KeyboardInterrupt:
-            print("\nGame interrupted by user.")
-            with open(self.HISTORY_FILE, "a") as f:
-                print("\nGame interrupted by user.", file=f)
+            self.write_to_history("Game interrupted by user.")
         except Exception as e:
-            print(f"Game error: {e}")
-            with open(self.HISTORY_FILE, "a") as f:
-                print(f"Game error: {e}", file=f)
+            self.write_to_history(f"Game error: {e}")
 
     def post_game_analysis(self):
         """Compute game metrics and write to a file."""

@@ -1,5 +1,6 @@
 from mlx_lm import load, generate
 
+
 class MLXChatClient:
     def __init__(self):
         """Initialize the client with an empty model cache."""
@@ -19,25 +20,51 @@ class MLXChatClient:
         if messages[0]["role"] == "system":
             # Merge the system message into the first user message
             if len(messages) > 1 and messages[1]["role"] == "user":
-                messages[1]["content"] = messages[0]["content"] + "\n\n" + messages[1]["content"]
+                messages[1]["content"] = (
+                    messages[0]["content"] + "\n\n" + messages[1]["content"]
+                )
                 messages.pop(0)  # Remove the system message
 
         # Ensure alternation of roles: user -> assistant -> user -> assistant
         expected_roles = ["user", "assistant"]
         for i, message in enumerate(messages):
             if message["role"] != expected_roles[i % 2]:
-                raise ValueError("Messages must alternate between user and assistant roles.")
+                raise ValueError(
+                    "Messages must alternate between user and assistant roles."
+                )
 
         # Apply chat template
-        prompt = tokenizer.apply_chat_template(conversation=messages, add_generation_prompt=True)
+        prompt = tokenizer.apply_chat_template(
+            conversation=messages, add_generation_prompt=True
+        )
 
         # Generate response
         if stream:
-            return generate(model=model_instance, tokenizer=tokenizer, prompt=prompt, max_tokens=1000, verbose=False)
+            return generate(
+                model=model_instance,
+                tokenizer=tokenizer,
+                prompt=prompt,
+                max_tokens=1000,
+                verbose=False,
+            )
         else:
-            tokens = [token for token in generate(model=model_instance, tokenizer=tokenizer, prompt=prompt, max_tokens=1000, verbose=False)]
+            tokens = [
+                token
+                for token in generate(
+                    model=model_instance,
+                    tokenizer=tokenizer,
+                    prompt=prompt,
+                    max_tokens=1000,
+                    verbose=False,
+                )
+            ]
             full_response = "".join(tokens)
-            return {"choices": [{"message": {"role": "assistant", "content": full_response}}]}
+            return {
+                "choices": [
+                    {"message": {"role": "assistant", "content": full_response}}
+                ]
+            }
+
 
 # Example usage
 client = MLXChatClient()
