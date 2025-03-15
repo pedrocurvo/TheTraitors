@@ -1,0 +1,68 @@
+# Game Configuration
+game:
+  agent_count: 10
+  traitor_count: 3
+  seed: 42
+  experiment_name: "experiment_1"
+
+# Default LLM Configuration (used if no specific agent config is provided)
+llm:
+  model: "gpt-3.5-turbo"
+  client_type: "openai"  # Options: openai, hf, mlx
+  provider: "openai"     # Options: openai, deepseek, together
+
+# Optional: Advanced Configuration
+advanced:
+  temperature: 0.7
+  max_tokens: 150
+  top_p: 0.9
+
+# Agent Configurations (optional)
+# These will be randomly assigned to agents
+agent_configs:
+  - model: "gpt-4"
+    client_type: "openai"
+    provider: "openai"
+    enforce_role: "Traitor"  # Optional: this agent will be a Traitor
+    traits:  # Optional: personality traits and background
+      profession: "Software Engineer"
+      nationality: "American"
+      age: 28
+      ethnicity: "Asian"
+      civil_status: "Single"
+      children: 0
+      gender_pronoun: "he"  # Optional: if provided, will use gendered pronouns in introductions
+  
+  - model: "deepseek-chat"
+    client_type: "openai"
+    provider: "deepseek"
+    enforce_role: "Faithful"  # Optional: this agent will be Faithful
+    traits:
+      profession: "High School Teacher"
+      nationality: "British"
+      age: 45
+      ethnicity: "Caucasian"
+      civil_status: "Married"
+      children: 2
+      gender_pronoun: "she"
+  
+  - model: "mixtral-8x7b"
+    client_type: "hf"
+    provider: "together"
+    traits:
+      profession: "Chef"
+      nationality: "Italian"
+      age: 35
+      ethnicity: "Mediterranean"
+      civil_status: "Divorced"
+      children: 1
+      # No gender_pronoun specified, will use neutral "Player X" format
+
+# If an agent doesn't get a specific configuration, it will use the default llm configuration
+# If enforce_role is not specified, the role will be randomly assigned
+# If traits are not specified, the agent will not be introduced in the introduction phase
+# If gender_pronoun is not specified, will use neutral "Player X" format
+
+# If an agent doesn't get a specific configuration, it will use the default llm configuration
+# If enforce_role is not specified, the role will be randomly assigned
+# If traits are not specified, the agent will not be introduced in the introduction phase 

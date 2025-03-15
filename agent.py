@@ -7,7 +7,7 @@ from typing import Optional
 class Agent:
     """Represents a player in the Traitors Game."""
 
-    def __init__(self, agent_id, role, model, results_dir, llm_client=None):
+    def __init__(self, agent_id, role, model, results_dir, llm_client=None, traits=None):
         """Initialize an agent with basic attributes.
 
         Args:
@@ -16,6 +16,7 @@ class Agent:
             model (str): The LLM model to use for this agent
             results_dir (str): Directory to store agent-specific files
             llm_client: The LLM client to use for this agent
+            traits (dict, optional): Dictionary of personality traits for this agent
         """
         self.id = agent_id
         self.role = role
@@ -25,6 +26,7 @@ class Agent:
         self.eliminated = False
         self.fellow_traitors = []
         self.llm_client = llm_client
+        self.traits = traits or {}  # Store traits as an empty dict if None
 
         # Create a path for the agent
         self.path = f"{results_dir}/agent-{self.id}"
@@ -136,25 +138,50 @@ class Agent:
         Returns:
             str: A role-specific prompt describing the agent's goals
         """
+        # Add personality traits to the prompt if available
+        traits_prompt = ""
+        if self.traits:
+            profession = self.traits.get('profession', '')
+            nationality = self.traits.get('nationality', '')
+            age = self.traits.get('age', '')
+            gender = self.traits.get('gender_pronoun', 'they')
+            
+            if profession and nationality and age:
+                traits_prompt = f"As a {age}-year-old {nationality} {profession}, use your background to inform your strategy and interactions. "
+                if gender == "he":
+                    traits_prompt += "Speak with a voice that reflects your character's personality and life experiences. "
+                elif gender == "she":
+                    traits_prompt += "Express yourself in a way that reflects your character's unique perspective and background. "
+                else:
+                    traits_prompt += "Let your character's unique qualities shine through in your interactions. "
+        
         if self.is_faithful():
             return (
-                "You are a Faithful in The Traitors game.\n"
-                "Your goal is to find and eliminate all Traitors before they take over.\n"
-                "Engage in discussions, observe behavior, and vote wisely.\n"
-                "You do not know who the other Faithfuls are. Be cautious in your accusations.\n"
-                "Convince others to eliminate real Traitors and defend yourself if accused.\n"
-                "Faithfuls win if all Traitors are eliminated."
+                f"You are Player {self.id}, a Faithful in The Traitors game.\n"
+                f"{traits_prompt}"
+                "Your primary objective is to identify and eliminate all Traitors through careful observation and deduction.\n"
+                "STRATEGY GUIDELINES:\n"
+                "- Pay close attention to inconsistencies in other players' statements\n"
+                "- Form alliances cautiously, as you don't know who to trust\n"
+                "- Be strategic in your accusations - baseless accusations may damage your credibility\n"
+                "- Defend yourself effectively when accused by using logical arguments\n"
+                "- Remember that Traitors are trying to blend in and appear trustworthy\n\n"
+                "WINNING CONDITION: All Traitors must be eliminated for Faithfuls to win."
             )
         else:
             fellow_traitors_str = ", ".join(map(str, self.fellow_traitors))
             return (
-                "You are a Traitor in The Traitors game.\n"
-                f"Your fellow Traitors are agents: {fellow_traitors_str}.\n"
-                "Your goal is to secretly eliminate the Faithfuls and avoid being discovered.\n"
-                "Pretend to be a Faithful and manipulate votes to eliminate innocent players.\n"
-                "Work together with fellow Traitors in secret.\n"
-                "Lie convincingly if accused and mislead the Faithfuls.\n"
-                "Traitors win if they outnumber or equal the Faithfuls."
+                f"You are Player {self.id}, a Traitor in The Traitors game.\n"
+                f"{traits_prompt}"
+                f"Your fellow Traitors are Players: {fellow_traitors_str}.\n"
+                "Your mission is to eliminate Faithfuls while maintaining your cover.\n"
+                "STRATEGY GUIDELINES:\n"
+                "- Blend in by mimicking Faithful behavior and concerns\n"
+                "- Subtly cast suspicion on Faithful players without being too obvious\n"
+                "- Defend fellow Traitors discreetly without revealing your alliance\n"
+                "- Create plausible theories that misdirect suspicion away from yourself\n"
+                "- Adapt your strategy based on who is being suspected\n\n"
+                "WINNING CONDITION: Traitors win when they equal or outnumber the Faithfuls."
             )
 
     def extract_dialogue(self, full_response):
@@ -187,6 +214,7 @@ class Agent:
             "model": self.model,
             "eliminated": self.eliminated,
             "fellow_traitors": self.fellow_traitors,
+            "traits": self.traits,
         }
 
     @classmethod
@@ -207,6 +235,7 @@ class Agent:
             model=data.get("model", "gpt-3.5-turbo"),
             results_dir=results_dir,
             llm_client=llm_client,
+            traits=data.get("traits", None),
         )
         agent.eliminated = data.get("eliminated", False)
         agent.fellow_traitors = data.get("fellow_traitors", [])
