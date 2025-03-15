@@ -33,10 +33,12 @@ TraitorsGame
 
 The `TraitorsGame` class is the central component that:
 
-- Initializes the game state and agents
-- Manages the game loop and phases (discussion, voting, elimination)
+- Initializes the game state and agents with their roles
+- Manages the game loop with multiple phases (discussion, voting, traitor elimination)
 - Handles game logic and win conditions
-- Records game history and metrics
+- Records game history, votes, and metrics
+- Supports agent customization through traits and role assignments
+- Implements introduction, discussion and post-elimination phases
 
 Agent
 ^^^^^
@@ -45,8 +47,10 @@ The `Agent` class represents a player in the game and:
 
 - Maintains agent state (role, memory, elimination status)
 - Handles agent-specific LLM interactions
+- Manages persona traits (age, profession, nationality, etc.)
 - Provides methods for role-specific behaviors
-- Manages agent memory and logging
+- Maintains awareness of fellow traitors (for traitor agents)
+- Records private memories and reflections
 
 LLM Client Hierarchy
 ^^^^^^^^^^^^^^^^^^^
@@ -54,9 +58,19 @@ LLM Client Hierarchy
 The LLM client classes provide a unified interface for different LLM providers:
 
 - `LLMClient`: Abstract base class defining the interface
-- `OpenAIClient`: For OpenAI and compatible APIs
-- `MLXClient`: For local MLX-based models
+- `OpenAIClient`: For OpenAI and compatible APIs (including Deepseek and Together AI)
+- `MLXClient`: For local MLX-based models (optimized for Mac with Apple Silicon)
 - `HuggingFaceClient`: For Hugging Face Inference API
+
+Configuration System
+------------------
+
+TheTraitors includes a flexible configuration system:
+
+- YAML-based configuration files for game parameters
+- Command-line arguments that can override configuration
+- Support for agent-specific configurations, including traits and enforced roles
+- Dynamic result directory creation based on experiment name and model
 
 Design Patterns
 --------------
@@ -67,18 +81,20 @@ The architecture employs several design patterns:
 2. **Strategy Pattern**: Different LLM clients implement the same interface
 3. **Facade Pattern**: `TraitorsGame` provides a simplified interface to the complex system
 4. **Observer Pattern**: Agents observe and react to game events
+5. **Configuration Pattern**: External configuration options control game behavior
 
-Data Flow
+Game Flow
 --------
 
-1. The game engine initializes agents with their roles
-2. During each round:
-   - Agents receive game state information
-   - Agents use their LLM clients to generate responses
-   - The game engine processes these responses
-   - Voting results in eliminations
-   - Game state is updated
-3. The process continues until a win condition is met
+1. **Initialization**: Game engine sets up agents with roles and traits
+2. **Introduction Phase**: Agents learn about each other's backgrounds
+3. **Main Game Loop**:
+   - **Discussion Phase**: All surviving agents discuss and share suspicions
+   - **Voting Phase**: Agents vote to eliminate a suspected traitor
+   - **Traitor Discussion Phase**: Traitors privately discuss strategy
+   - **Traitor Elimination Phase**: Traitors eliminate a faithful player
+   - **Win Condition Check**: Game checks if either side has met victory conditions
+4. **Post-Game Analysis**: Computation of game metrics and statistics
 
 File Structure
 -------------
@@ -86,10 +102,15 @@ File Structure
 .. code-block:: text
 
    TheTraitors/
-   ├── main.py           # Main game engine
-   ├── agent.py          # Agent class definition
-   ├── llm_client.py     # LLM client classes
-   ├── utils.py          # Utility functions
-   ├── requirements.txt  # Dependencies
-   ├── results/          # Game results directory
-   └── docs/             # Documentation 
+   ├── main.py               # Main entry point and CLI
+   ├── traitors_game.py      # Main game engine
+   ├── agent.py              # Agent class definition
+   ├── llm_client.py         # LLM client interface and factory
+   ├── MLXChatClient.py      # MLX-specific client for local models
+   ├── utils/
+   │   ├── __init__.py       # Common utilities
+   │   ├── config.py         # Configuration handling
+   │   └── metrics.py        # Game metrics computation
+   ├── requirements.txt      # Dependencies
+   ├── docs/                 # Documentation
+   └── results/              # Game results directory

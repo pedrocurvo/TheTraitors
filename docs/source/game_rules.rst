@@ -1,103 +1,117 @@
 Game Rules
 ==========
 
-TheTraitors is a social deduction game where agents must identify and eliminate the traitors among them.
+TheTraitors implements a strategic social deduction game where agents must use dialogue, deduction, and deception to achieve their role-specific goals.
 
-Roles
------
+Core Concepts
+------------
 
-There are two roles in the game:
+**Roles**:
+  - **Faithful**: The majority of players who must identify and eliminate traitors
+  - **Traitor**: A minority of players who know each other's identities and eliminate faithful players at night
 
-**Faithfuls**
-  The majority of agents are Faithfuls. They don't know who the other Faithfuls are and must work together to identify and eliminate the Traitors.
+**Objectives**:
+  - **Faithful Win Condition**: Eliminate all traitors
+  - **Traitor Win Condition**: Equal or outnumber the faithful players
 
-**Traitors**
-  A small number of agents are secretly Traitors. They know who the other Traitors are and must eliminate the Faithfuls while avoiding detection.
+**Information Asymmetry**:
+  - Traitors know who all other traitors are
+  - Faithful players only know the total number of traitors, not their identities
 
-Game Flow
---------
+Game Phases
+----------
 
-The game proceeds in rounds, with each round consisting of several phases:
+Introduction Phase
+^^^^^^^^^^^^^^^^^
 
-1. **Discussion Phase**
-   - All active agents discuss and share suspicions
-   - Agents can strategically reveal information or mislead others
-   - Each agent gets a chance to speak and respond to others
+The game begins with an introduction phase where agents share background information:
 
-2. **Voting Phase**
-   - All active agents vote to eliminate one player
-   - The player with the most votes is eliminated
-   - The eliminated player's role is revealed to all
+- Agent traits like profession, age, nationality are revealed
+- Agents reflect on this information (in their memory)
+- This phase establishes the game's social context
 
-3. **Post-Elimination Discussion**
-   - Agents discuss the recent elimination
-   - This provides an opportunity to update strategies based on new information
+Discussion Phase
+^^^^^^^^^^^^^^^
 
-4. **Traitor Discussion Phase** (Secret)
-   - Traitors meet secretly to discuss their strategy
-   - They decide which Faithful to eliminate
+During each round's discussion phase:
 
-5. **Traitor Elimination Phase** (Secret)
-   - Traitors vote to eliminate one Faithful
-   - The eliminated player is announced but their role is not revealed
+1. All surviving agents engage in an open dialogue
+2. Agents share suspicions, defenses, and observations
+3. The discussion is guided by round-specific topics
+4. Multiple conversation turns allow for in-depth discussion
+5. Agents update their memories with key insights
 
-Win Conditions
--------------
+Voting Phase
+^^^^^^^^^^^
 
-The game continues until one of the following conditions is met:
+Following discussion, the voting phase occurs:
 
-**Faithfuls Win**
-  All Traitors have been eliminated.
+1. Each agent casts a vote for who they suspect is a traitor
+2. The agent receiving the most votes is eliminated
+3. The eliminated agent's role is revealed to all
+4. A post-elimination discussion allows agents to react
 
-**Traitors Win**
-  The number of Traitors equals or exceeds the number of Faithfuls.
+Traitor Discussion Phase
+^^^^^^^^^^^^^^^^^^^^^
 
-Agent Memory
------------
+After public voting, traitors meet privately:
 
-Each agent maintains a memory of game events, including:
+1. Surviving traitors discuss which faithful agent to eliminate
+2. They share strategic assessments and target recommendations
+3. Each traitor votes for their preferred target
+4. This phase is invisible to faithful agents
 
-- Discussions and accusations
-- Eliminations and revealed roles
-- Their own observations and conclusions
+Traitor Elimination Phase
+^^^^^^^^^^^^^^^^^^^^^^
 
-This memory influences their future decisions and strategies.
+Based on traitor votes:
 
-Game Parameters
---------------
+1. The faithful agent receiving the most traitor votes is eliminated
+2. This elimination is announced at the start of the next round
+3. The eliminated agent's identity is known, but traitors remain anonymous
 
-The game can be customized with various parameters:
+Win Condition Check
+^^^^^^^^^^^^^^^^
 
-- **Number of agents**: Total number of players (default: 10)
-- **Number of traitors**: Number of traitors among the agents (default: 3)
-- **LLM model**: The language model used for agent responses
-- **Random seed**: For reproducible game simulations
+After each cycle of phases, win conditions are checked:
 
-Example Game Round
+1. If all traitors are eliminated, faithful players win
+2. If traitors equal or outnumber faithful players, traitors win
+3. If neither condition is met, another round begins
+
+Agent Behavior
+------------
+
+Faithful Agent Strategy
+^^^^^^^^^^^^^
+
+Faithful agents typically:
+
+- Observe discussion patterns for inconsistencies
+- Apply deductive reasoning to identify traitors
+- Establish trust with other agents they believe are faithful
+- Share observations and suspicions with the group
+- Vote strategically to eliminate suspected traitors
+
+Traitor Agent Strategy
+^^^^^^^^^^^
+
+Traitor agents typically:
+
+- Pretend to be faithful to avoid suspicion
+- Strategically cast suspicion on faithful agents
+- Coordinate with other traitors through private discussions
+- Carefully manage information to avoid contradictions
+- Vote strategically to eliminate influential faithful agents
+
+Memory and Learning
 -----------------
 
-Here's an example of how a round might proceed:
+Agents maintain memory throughout the game:
 
-1. **Discussion Phase**:
-   - Player 1 (Faithful): "I'm suspicious of Player 5 because they've been quiet."
-   - Player 5 (Traitor): "I've been observing. Actually, Player 3 seems suspicious to me."
-   - ... (all players contribute)
+- Each agent records key insights from discussions
+- Agents reflect on eliminations and their implications
+- Memory helps agents maintain consistent behavior
+- Agents use memory to track suspicions and alliances
 
-2. **Voting Phase**:
-   - Players cast votes
-   - Player 3 receives the most votes and is eliminated
-   - Player 3 is revealed to be a Faithful
-
-3. **Post-Elimination Discussion**:
-   - Players discuss the elimination of Player 3
-   - Player 5 (Traitor) strategically deflects suspicion
-
-4. **Traitor Discussion** (secret):
-   - Traitors discuss who to eliminate next
-   - They decide on Player 8, who they believe is influential
-
-5. **Traitor Elimination**:
-   - Player 8 is eliminated overnight
-   - The game announces: "Player 8 was eliminated by the traitors in the night."
-
-The next round begins with fewer players, and the cycle continues until a win condition is met. 
+This memory system allows agents to learn and adapt their strategies as the game progresses, creating a more realistic and engaging simulation.

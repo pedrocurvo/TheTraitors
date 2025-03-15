@@ -1,131 +1,309 @@
-API
-===
+API Reference
+============
 
-This page details the API for TheTraitors framework.
+This section provides a detailed reference for the key classes and functions in TheTraitors.
 
 TraitorsGame
-------------
+-----------
 
-.. py:class:: TraitorsGame
+The main game engine that manages the simulation.
 
-   The main class that manages the game simulation.
+.. code-block:: python
 
-   .. py:method:: __init__(agent_count=10, traitor_count=3, model="deepseek-chat", seed=None, client_type="openai", provider=None, experiment_name=None)
+   class TraitorsGame:
+       def __init__(
+           self,
+           config,
+           agent_count=10,
+           traitor_count=3,
+           model="deepseek-chat",
+           seed=None,
+           client_type="openai",
+           provider=None,
+           experiment_name=None
+       ):
+           """
+           Initialize the Traitors Game.
 
-      Initialize a new Traitors game.
+           Args:
+               config: Configuration dictionary
+               agent_count: Default number of total agents in the game
+               traitor_count: Default number of traitors among the agents
+               model: Default model name to use
+               seed: Random seed for reproducibility
+               client_type: Default type of client to use ("openai", "hf", "mlx")
+               provider: Default provider for the client
+               experiment_name: Optional name for the experiment
+           """
 
-      :param agent_count: Number of agents in the game
-      :param traitor_count: Number of traitors among the agents
-      :param model: Model name to use for LLM calls
-      :param seed: Random seed for reproducibility
-      :param client_type: Type of client to use ("openai", "hf", "mlx")
-      :param provider: Provider for the client
-      :param experiment_name: Optional name for the experiment
+Key Methods
+^^^^^^^^^^
 
-   .. py:method:: create_agents(agent_count, traitor_count)
+.. code-block:: python
 
-      Initialize agents with unique roles.
+   def create_agents(self, agent_count, traitor_count):
+       """
+       Initialize agents with unique roles and traits from configuration.
+       Returns a list of Agent instances.
+       """
 
-      :param agent_count: Number of agents to create
-      :param traitor_count: Number of traitors to assign
-      :return: List of Agent objects
+   def introduction_phase(self):
+       """
+       Run the introduction phase where agents share their background traits.
+       """
 
-   .. py:method:: call_llm(agent)
+   def discussion_phase(self):
+       """
+       Run a discussion phase where agents communicate and discuss who to vote out.
+       """
 
-      Call the LLM API to generate agent responses.
+   def voting_phase(self):
+       """
+       Run a voting phase where agents vote to eliminate a suspected traitor.
+       """
 
-      :param agent: The agent to generate a response for
-      :return: The agent's response text
+   def traitor_discussion_phase(self):
+       """
+       Run a private discussion among traitor agents to decide who to eliminate.
+       """
 
-   .. py:method:: run()
+   def traitor_elimination_phase(self, traitors, active_faithfuls):
+       """
+       Execute the traitor elimination decision.
+       """
 
-      Run the game simulation until a winner is determined.
+   def check_win_conditions(self):
+       """
+       Check if the game has ended and determine the winner.
+       Returns the winner ("Faithfuls", "Traitors") or None if game continues.
+       """
 
-   .. py:method:: post_game_analysis()
+   def run(self):
+       """
+       Execute the main game loop until win conditions are met.
+       """
 
-      Compute game metrics and write to a file.
+   def post_game_analysis(self):
+       """
+       Compute and save game metrics after the game has completed.
+       """
 
 Agent
------
+----
 
-.. py:class:: Agent
+The Agent class represents a player in the game.
 
-   Represents a player in the Traitors Game.
+.. code-block:: python
 
-   .. py:method:: __init__(agent_id, role, model, results_dir, llm_client=None)
+   class Agent:
+       def __init__(self, id, role, model, results_dir, traits=None):
+           """
+           Initialize an Agent.
+           
+           Args:
+               id: Unique identifier for the agent
+               role: Either "Traitor" or "Faithful"
+               model: The LLM model to use for this agent
+               results_dir: Directory to save agent outputs
+               traits: Optional dictionary of agent traits (age, profession, etc.)
+           """
 
-      Initialize an agent with basic attributes.
+Key Methods
+^^^^^^^^^^
 
-      :param agent_id: The unique identifier for this agent
-      :param role: Either "Faithful" or "Traitor"
-      :param model: The LLM model to use for this agent
-      :param results_dir: Directory to store agent-specific files
-      :param llm_client: The LLM client to use for this agent
+.. code-block:: python
 
-   .. py:method:: set_llm_client(llm_client)
+   def set_llm_client(self, client):
+       """
+       Set the LLM client for this agent.
+       """
 
-      Set the LLM client for this agent.
+   def set_fellow_traitors(self, traitor_ids):
+       """
+       Provide a list of fellow traitor IDs to this agent (only for traitors).
+       """
 
-      :param llm_client: The LLM client to use
+   def set_prompt(self, prompt):
+       """
+       Set the current prompt for the agent.
+       """
 
-   .. py:method:: call_llm(user_prompt)
+   def add_to_memory(self, content, label=None):
+       """
+       Add content to the agent's memory, optionally with a label.
+       """
 
-      Call the LLM API to generate a response.
+   def call_llm(self, prompt):
+       """
+       Call the LLM client to generate a response.
+       """
 
-      :param user_prompt: The prompt to send to the LLM
-      :return: The LLM's response
+   def is_traitor(self):
+       """
+       Return True if the agent is a traitor, False otherwise.
+       """
 
-   .. py:method:: is_traitor()
+   def is_faithful(self):
+       """
+       Return True if the agent is faithful, False otherwise.
+       """
 
-      Check if the agent is a traitor.
+   def is_eliminated(self):
+       """
+       Return True if the agent has been eliminated, False otherwise.
+       """
 
-      :return: True if the agent is a traitor, False otherwise
+   def eliminate(self):
+       """
+       Mark the agent as eliminated.
+       """
 
-   .. py:method:: is_faithful()
+LLM Clients
+----------
 
-      Check if the agent is faithful.
-
-      :return: True if the agent is faithful, False otherwise
-
-   .. py:method:: is_eliminated()
-
-      Check if the agent has been eliminated.
-
-      :return: True if the agent has been eliminated, False otherwise
-
-LLMClient
----------
-
-.. py:class:: LLMClient
-
-   Abstract base class for LLM clients.
-
-   .. py:method:: __init__(model)
-
-      Initialize the LLM client.
-
-      :param model: The model name to use for API calls
-
-   .. py:method:: call(system_message, user_message)
-
-      Call the LLM API with the given messages.
-
-      :param system_message: The system message to send
-      :param user_message: The user message to send
-      :return: The LLM's response text
+The framework includes several LLM client implementations for different providers.
 
 LLMClientFactory
----------------
+^^^^^^^^^^^^^^^
 
-.. py:class:: LLMClientFactory
+.. code-block:: python
 
-   Factory for creating LLM clients based on configuration.
+   class LLMClientFactory:
+       @staticmethod
+       def create_client(client_type, model, provider=None):
+           """
+           Create and return an LLM client based on the specified type.
+           
+           Args:
+               client_type: Type of client ("openai", "hf", "mlx")
+               model: Model name to use
+               provider: Provider name (for compatible APIs)
+               
+           Returns:
+               An instance of an LLMClient implementation
+           """
 
-   .. py:staticmethod:: create_client(client_type, model, provider=None)
+OpenAIClient
+^^^^^^^^^^^
 
-      Create an LLM client based on the specified type.
+.. code-block:: python
 
-      :param client_type: Type of client to create ('openai', 'mlx', 'hf')
-      :param model: Model name to use
-      :param provider: Optional provider name for certain client types
-      :return: An instance of the appropriate LLMClient subclass
+   class OpenAIClient:
+       def __init__(self, model, provider=None):
+           """
+           Initialize an OpenAI-compatible client.
+           
+           Args:
+               model: Model name to use
+               provider: Provider name ("openai", "deepseek", "together")
+           """
+           
+       def call(self, prompt):
+           """
+           Call the OpenAI-compatible API with the given prompt.
+           
+           Args:
+               prompt: The prompt to send to the API
+               
+           Returns:
+               The generated text response
+           """
+
+HuggingFaceClient
+^^^^^^^^^^^^^^^
+
+.. code-block:: python
+
+   class HuggingFaceClient:
+       def __init__(self, model):
+           """
+           Initialize a Hugging Face Inference API client.
+           
+           Args:
+               model: The model name to use on Hugging Face
+           """
+           
+       def call(self, prompt):
+           """
+           Call the Hugging Face Inference API with the given prompt.
+           
+           Args:
+               prompt: The prompt to send to the API
+               
+           Returns:
+               The generated text response
+           """
+
+MLXClient
+^^^^^^^^
+
+.. code-block:: python
+
+   class MLXClient:
+       def __init__(self, model):
+           """
+           Initialize an MLX-based client for local model inference.
+           
+           Args:
+               model: The MLX-compatible model name to load
+           """
+           
+       def call(self, prompt):
+           """
+           Generate a response using a local MLX model.
+           
+           Args:
+               prompt: The prompt to send to the model
+               
+           Returns:
+               The generated text response
+           """
+
+Utility Functions
+--------------
+
+TheTraitors includes several utility functions for configuration management and metrics computation.
+
+Configuration
+^^^^^^^^^^^
+
+.. code-block:: python
+
+   def load_config(config_path):
+       """
+       Load a YAML configuration file.
+       
+       Args:
+           config_path: Path to the YAML configuration file
+           
+       Returns:
+           A dictionary containing the configuration
+       """
+       
+   def merge_config_with_args(config, args):
+       """
+       Merge command line arguments with a configuration dictionary.
+       
+       Args:
+           config: The base configuration dictionary
+           args: Parsed command line arguments
+           
+       Returns:
+           The merged configuration dictionary
+       """
+
+Metrics
+^^^^^^
+
+.. code-block:: python
+
+   def compute_traitors_game_metrics(csv_file):
+       """
+       Compute game metrics from a votes CSV file.
+       
+       Args:
+           csv_file: Path to the votes CSV file
+           
+       Returns:
+           A dictionary of computed metrics
+       """
