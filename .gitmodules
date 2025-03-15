@@ -1,0 +1,4 @@
+
+[submodule "Paper"]
+	path = Paper
+	url = https://github.com/pedrocurvo/thetraitors-paper.git
