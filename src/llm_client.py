@@ -1,7 +1,7 @@
 import os
 import re
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Any, Union
+from typing import Optional
 
 
 class LLMClient(ABC):
@@ -26,7 +26,6 @@ class LLMClient(ABC):
         Returns:
             The LLM's response text
         """
-        pass
 
     def extract_dialogue(self, full_response: str) -> str:
         """Extract dialogue from between triple dashes in the response.

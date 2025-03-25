@@ -1,14 +1,14 @@
 import os
 import random
-import time
-import sys
-import yaml
 import re
+import time
 from pathlib import Path
 
-from utils import compute_traitors_game_metrics
-from agent import Agent  # Import the Agent class
-from llm_client import LLMClientFactory  # Import the LLM client factory
+# Update imports to use modules from src
+from src.agent import Agent
+from src.llm_client import LLMClientFactory
+from src.prompt_manager import PromptManager
+from src.utils import compute_traitors_game_metrics
 
 
 class TraitorsGame:
@@ -136,46 +136,50 @@ class TraitorsGame:
 
         # Phase 1: Create agents with specific configurations from config file
         specific_configs = []
-        if 'agent_configs' in self.config:
+        if "agent_configs" in self.config:
             # Get all specific agent configurations
-            specific_configs = self.config['agent_configs']
+            specific_configs = self.config["agent_configs"]
             # Shuffle the configurations to randomize assignment
             random.shuffle(specific_configs)
 
         # Create all agents
         for i in range(agent_count):
             # Determine if this agent gets a specific configuration
-            agent_config = specific_configs[i] if i < len(specific_configs) else self.config['llm']
-            
+            agent_config = (
+                specific_configs[i] if i < len(specific_configs) else self.config["llm"]
+            )
+
             # Get traits if they exist in the configuration
-            traits = agent_config.get('traits', None)
-            
+            traits = agent_config.get("traits", None)
+
             agent = Agent(
                 i,
                 "Faithful",  # Default role, may be changed later
-                agent_config.get('model', self.config['llm']['model']),
+                agent_config.get("model", self.config["llm"]["model"]),
                 self.RESULTS_DIR,
-                traits=traits  # Pass traits to the Agent constructor
+                traits=traits,  # Pass traits to the Agent constructor
             )
 
             # Handle role enforcement if specified
-            if 'enforce_role' in agent_config:
-                if agent_config['enforce_role'] == "Traitor":
+            if "enforce_role" in agent_config:
+                if agent_config["enforce_role"] == "Traitor":
                     agent.role = "Traitor"
                     enforced_traitors += 1
-                elif agent_config['enforce_role'] == "Faithful":
+                elif agent_config["enforce_role"] == "Faithful":
                     agent.role = "Faithful"
                     enforced_faithfuls += 1
                 else:
-                    raise ValueError(f"Invalid enforced role: {agent_config['enforce_role']}")
+                    raise ValueError(
+                        f"Invalid enforced role: {agent_config['enforce_role']}"
+                    )
             else:
                 flexible_agents.append(agent)
 
             # Create and assign LLM client
             agent_client = LLMClientFactory.create_client(
-                agent_config.get('client_type', self.config['llm']['client_type']),
-                agent_config.get('model', self.config['llm']['model']),
-                agent_config.get('provider', self.config['llm'].get('provider'))
+                agent_config.get("client_type", self.config["llm"]["client_type"]),
+                agent_config.get("model", self.config["llm"]["model"]),
+                agent_config.get("provider", self.config["llm"].get("provider")),
             )
             agent.set_llm_client(agent_client)
             agents.append(agent)
@@ -185,7 +189,9 @@ class TraitorsGame:
         if remaining_traitors < 0:
             raise ValueError("More enforced traitors than total traitor count")
         if len(flexible_agents) < remaining_traitors:
-            raise ValueError("Not enough flexible agents to assign remaining traitor roles")
+            raise ValueError(
+                "Not enough flexible agents to assign remaining traitor roles"
+            )
         if enforced_faithfuls > agent_count - traitor_count:
             raise ValueError("More enforced faithfuls than total faithful count")
 
@@ -208,11 +214,11 @@ class TraitorsGame:
             # Find the configuration that was used for this agent
             if i < len(specific_configs):
                 config = specific_configs[i]
-                role_info = "(Enforced)" if 'enforce_role' in config else "(Random)"
+                role_info = "(Enforced)" if "enforce_role" in config else "(Random)"
             else:
-                config = self.config['llm']
+                config = self.config["llm"]
                 role_info = "(Random)"
-            
+
             self.write_to_history(
                 f"Agent {agent.id} - {agent.role} {role_info}: "
                 f"Model={config.get('model', self.config['llm']['model'])}, "
@@ -223,19 +229,8 @@ class TraitorsGame:
 
     def call_llm(self, agent):
         """Call the LLM API to generate agent responses."""
-        # Add formatting instructions with delimiters
-        formatted_prompt = (
-            f"{agent.current_prompt}\n\n"
-            "Important: First, decide what your character would say in this situation. "
-            "Then provide ONLY your character's actual dialogue between triple dashes like this:\n"
-            "---\n"
-            "Your in-game dialogue here\n"
-            "---\n"
-            "Keep the thoughts outside the triple dashes.\n\n"
-            "Keep your response brief (50-100 words). Only the text between the triple dashes will be shown to other players."
-            "Main Task: What would you say next in the group chat? "
-            "Ensure the conversation flows naturally and AVOIDS REPETITION.\n\n"
-        )
+        # Simplified prompt - the formatting is now handled by the PromptManager in the agent's call_llm method
+        formatted_prompt = agent.current_prompt
 
         try:
             # Use the agent's own LLM client to generate a response
@@ -281,8 +276,8 @@ class TraitorsGame:
             new_discussions.append(self.traitors_last_eliminated)
 
         active_agents = [a for a in self.agents if not a.is_eliminated()]
-        eliminated_agents = [a for a in self.agents if a.is_eliminated()]
-        
+        [a for a in self.agents if a.is_eliminated()]
+
         # Create round-specific discussion topics
         round_topics = [
             "Who do you suspect might be a Traitor and why?",
@@ -290,55 +285,28 @@ class TraitorsGame:
             "Which player's arguments or defenses seem inconsistent or weak?",
             "Who do you trust the most and why?",
             "What strategy do you think the Traitors are using in this game?",
-            "Who has been flying under the radar and not contributing much to discussions?"
+            "Who has been flying under the radar and not contributing much to discussions?",
         ]
-        
+
         # Select topic based on round number (cycling through topics)
         topic_index = (self.round_number - 1) % len(round_topics)
         current_topic = round_topics[topic_index]
-        
-        # Add context about eliminated players if any
-        elimination_context = ""
-        if eliminated_agents:
-            last_eliminated = [a for a in eliminated_agents if a.id == max(e.id for e in eliminated_agents)]
-            if last_eliminated:
-                elimination_context = f"Player {last_eliminated[0].id} was just eliminated. "
-                if self.round_number > 1:
-                    elimination_context += "How does this change your assessment of who the Traitors might be? "
 
         # First round of comments - each agent shares thoughts on the current topic
         for i, agent in enumerate(active_agents):
             game_status = self.get_game_status()
-            
-            # Create a personalized prompt based on the agent's role and the round
-            if agent.is_traitor():
-                strategy_hint = "Remember to blend in while subtly casting suspicion on Faithfuls."
-            else:
-                strategy_hint = "Try to identify inconsistencies in others' statements that might reveal Traitors."
-            
-            # Vary the prompt based on round number
-            if self.round_number == 1:
-                prompt = (
-                    f"{game_status}\n\n"
-                    "This is the first round of discussions. Share your initial thoughts and observations. "
-                    f"{current_topic} {strategy_hint}"
-                )
-            else:
-                prompt = (
-                    f"{game_status}\n\n"
-                    f"Round {self.round_number} of discussions. {elimination_context}"
-                    f"{current_topic} Consider what you've learned from previous rounds. {strategy_hint}"
-                )
-            
-            agent.set_prompt(prompt)
 
-            if i == 0 and self.round_number == 1:
-                agent.current_prompt += "\n\nYou are the first to speak in this game. Set the tone for the discussion."
-            
-            if new_discussions:
-                agent.current_prompt += (
-                    f"\n\nCurrent discussion: {' '.join(new_discussions)}"
-                )
+            # Use the prompt manager to create a structured discussion prompt
+            prompt = PromptManager.get_discussion_prompt(
+                game_status,
+                self.round_number,
+                agent,
+                current_topic,
+                " ".join(new_discussions) if new_discussions else None,
+                is_first_speaker=(i == 0 and self.round_number == 1),
+            )
+
+            agent.set_prompt(prompt)
 
             response = self.call_llm(agent)
             message = f"Player {agent.id}: {response}"
@@ -354,16 +322,18 @@ class TraitorsGame:
                 "Do you agree or disagree with any particular accusations? Explain why.",
                 "Has anyone said something that changed your perspective?",
                 "Would you like to defend yourself or challenge someone else's statement?",
-                "What important points do you think are being overlooked in this discussion?"
+                "What important points do you think are being overlooked in this discussion?",
             ]
-            
+
             # Select a reaction prompt based on agent ID and round number to ensure variety
             reaction_index = (i + self.round_number) % len(reaction_prompts)
             reaction_prompt = reaction_prompts[reaction_index]
-            
+
+            # Use the prompt manager for reaction prompt
             agent.set_prompt(
-                f"{reaction_prompt} "
-                f"\n\nDiscussion so far: {' '.join(new_discussions)}"
+                PromptManager.get_reaction_prompt(
+                    reaction_prompt, " ".join(new_discussions)
+                )
             )
 
             response = self.call_llm(agent)
@@ -380,61 +350,31 @@ class TraitorsGame:
                 "Summarize the key points from this discussion that you want to remember.",
                 "What were the most revealing statements in this discussion?",
                 "Update your assessment of who might be Traitors based on this discussion.",
-                "What important clues or patterns emerged in this round?"
+                "What important clues or patterns emerged in this round?",
             ]
-            
+
             # Select memory prompt based on agent ID and round
             memory_index = (agent.id + self.round_number) % len(memory_prompts)
             memory_prompt = memory_prompts[memory_index]
-            
+
+            # Use the prompt manager for memory prompt
             agent.set_prompt(
-                f"{memory_prompt} "
-                f"Focus on information that will help your strategy: {' '.join(all_discussions)}"
+                PromptManager.get_memory_prompt(
+                    memory_prompt, " ".join(all_discussions)
+                )
             )
+
             memory_response = self.call_llm(agent)
             agent.add_to_memory(memory_response, f"ROUND {self.round_number} MEMORY")
 
     def process_vote(self, agent, vote_type, active_players, votes_dict, votes_list):
         """Process a vote from an agent and update tracking structures."""
-        # Create more strategic voting prompts based on the agent's role and game state
+        # Get active player IDs
         active_player_ids = [str(a.id) for a in active_players]
-        
-        # Create different voting prompts based on the agent's role
-        if agent.is_traitor():
-            # For traitors, emphasize strategic voting
-            strategic_hint = (
-                "As a Traitor, your vote is crucial. Consider voting strategically to eliminate Faithfuls "
-                "or to deflect suspicion from yourself or fellow Traitors."
-            )
-            
-            # Add info about fellow traitors for strategic coordination
-            fellow_traitors_ids = [str(id) for id in agent.fellow_traitors]
-            active_fellow_traitors = [id for id in fellow_traitors_ids if id in active_player_ids]
-            if active_fellow_traitors:
-                strategic_hint += f" Remember that your fellow Traitors (Players {', '.join(active_fellow_traitors)}) are still active."
-        else:
-            # For faithfuls, emphasize deduction
-            strategic_hint = (
-                "As a Faithful, your goal is to identify and eliminate Traitors. "
-                "Review the discussions carefully and vote based on your suspicions."
-            )
-        
-        # Add round-specific context
-        if self.round_number == 1:
-            round_context = "This is the first elimination. You have limited information to go on, but must make a choice."
-        elif self.round_number < 3:
-            round_context = "The game is still in early stages. Consider both current discussions and past eliminations."
-        else:
-            round_context = "The game is progressing. Patterns may be emerging that could reveal who the Traitors are."
-        
-        # Create the final voting prompt
+
+        # Use the prompt manager to create a structured voting prompt
         agent.set_prompt(
-            f"Based on all discussions and your memory:\n{agent.memory}\n\n"
-            f"It's time to vote for elimination. Round {self.round_number}.\n"
-            f"{round_context}\n"
-            f"{strategic_hint}\n\n"
-            f"The active players are: {', '.join(active_player_ids)}.\n"
-            "Who are you voting to eliminate? Respond with ONLY the player number."
+            PromptManager.get_voting_prompt(self.round_number, agent, active_player_ids)
         )
 
         vote_response = self.call_llm(agent)
@@ -500,7 +440,7 @@ class TraitorsGame:
         # Update all active agents' memory
         for agent in self.agents:
             if not agent.is_eliminated():
-                agent.add_to_memory(elimination_message)
+                agent.add_to_memory(elimination_message, "ELIMINATION EVENT")
 
         # Update votes_list with the eliminated player
         for vote in votes_list:
@@ -554,11 +494,11 @@ class TraitorsGame:
         active_agents = [a for a in self.agents if not a.is_eliminated()]
 
         for agent in active_agents:
+            # Use prompt manager for post-elimination prompt
             agent.set_prompt(
-                f"Player {eliminated} was eliminated and was a {eliminated_agent.role}. "
-                "What are your thoughts on this elimination? Has this changed your suspicions? "
-                "Be strategic based on your role. "
-                "Consider past eliminations and discussions."
+                PromptManager.get_post_elimination_prompt(
+                    eliminated, eliminated_agent.role
+                )
             )
 
             if discussion_prompts:
@@ -597,55 +537,21 @@ class TraitorsGame:
 
         # Create more strategic and varied prompts for traitor discussions
         traitor_discussion = []
-        
-        # Create round-specific strategic questions for traitors
-        strategic_questions = [
-            "Who is the most dangerous Faithful that could expose us?",
-            "Which Faithful seems most trusted by others?",
-            "Who would be least suspicious for us to eliminate?",
-            "Is there a Faithful who's close to figuring out our identities?",
-            "Should we eliminate someone who's been quiet, or someone vocal?"
-        ]
-        
-        # Select a strategic question based on the round
-        question_index = (self.round_number - 1) % len(strategic_questions)
-        strategic_question = strategic_questions[question_index]
-        
-        # Add game state analysis for traitors
-        game_state = ""
-        if self.round_number > 1:
-            traitor_count = len(traitors)
-            faithful_count = len(active_faithfuls)
-            game_state = (
-                f"Current game state: {traitor_count} Traitors vs {faithful_count} Faithfuls. "
-                f"You need {faithful_count - traitor_count} more eliminations to win. "
-            )
-        
-        for i, traitor in enumerate(traitors):
-            # Create a personalized prompt for each traitor
-            if i == 0:
-                # First traitor sets the tone
-                traitor.set_prompt(
-                    f"SECRET TRAITOR MEETING: You are with your fellow traitors: {', '.join(str(t.id) for t in traitors)}.\n"
-                    f"{game_state}"
-                    f"The Faithfuls still in the game are: {', '.join(str(a.id) for a in active_faithfuls)}.\n\n"
-                    f"As the first to speak in this secret meeting, assess the current situation. {strategic_question} "
-                    "Suggest a target and explain your reasoning strategically."
-                )
-            else:
-                # Other traitors respond to the ongoing discussion
-                traitor.set_prompt(
-                    f"SECRET TRAITOR MEETING: You are with your fellow traitors: {', '.join(str(t.id) for t in traitors)}.\n"
-                    f"{game_state}"
-                    f"The Faithfuls still in the game are: {', '.join(str(a.id) for a in active_faithfuls)}.\n\n"
-                    f"Consider what your fellow traitors have said. Do you agree with their target selection? {strategic_question} "
-                    "Share your thoughts on who to eliminate and why."
-                )
 
-            if traitor_discussion:
-                traitor.current_prompt += (
-                    f"\n\nTraitor discussion so far: {' '.join(traitor_discussion)}"
+        for i, traitor in enumerate(traitors):
+            # Use prompt manager for traitor meeting prompt
+            traitor.set_prompt(
+                PromptManager.get_traitor_meeting_prompt(
+                    traitor.id,
+                    [str(t.id) for t in traitors],
+                    [str(a.id) for a in active_faithfuls],
+                    self.round_number,
+                    is_first_speaker=(i == 0),
+                    discussion=(
+                        " ".join(traitor_discussion) if traitor_discussion else None
+                    ),
                 )
+            )
 
             response = self.call_llm(traitor)
             message = f"Traitor {traitor.id}: {response}"
@@ -654,7 +560,7 @@ class TraitorsGame:
 
         # Second round for traitors to reach consensus with more strategic depth
         consensus_discussion = []
-        
+
         # Create consensus-building prompts that vary by round
         if self.round_number == 1:
             consensus_prompt = (
@@ -671,11 +577,10 @@ class TraitorsGame:
                 "We're getting closer to our goal. Which strategic elimination would bring us closest to victory? "
                 "Consider both the numbers and which Faithfuls pose the greatest threat to our identities."
             )
-        
+
         for traitor in traitors:
             traitor.set_prompt(
-                f"{consensus_prompt} "
-                f"Discussion: {' '.join(traitor_discussion)}"
+                f"{consensus_prompt} " f"Discussion: {' '.join(traitor_discussion)}"
             )
 
             response = self.call_llm(traitor)
@@ -690,7 +595,7 @@ class TraitorsGame:
                 f"SECRET TRAITOR MEETING SUMMARY (ROUND {self.round_number}):\n{traitor_memory}\n\n"
                 f"STRATEGIC NOTES: Remember who we discussed eliminating and why. "
                 f"In public discussions, be careful not to reveal information only Traitors would know.",
-                f"SECRET TRAITOR MEETING (ROUND {self.round_number})"
+                f"SECRET TRAITOR MEETING (ROUND {self.round_number})",
             )
 
         self.traitor_elimination_phase(traitors, active_faithfuls)
@@ -709,24 +614,32 @@ class TraitorsGame:
             elimination_context = "The game is developing. Consider eliminating someone who poses a threat to your secrecy."
         else:
             elimination_context = "The end game approaches. Each elimination brings you closer to victory."
-            
+
         # Get the consensus from the previous discussion
         consensus_targets = []
         for traitor in traitors:
             # Extract the most recent traitor meeting memory
-            traitor_memories = [m for m in traitor.memory.split("\n--- SECRET TRAITOR MEETING") if "ROUND" in m]
+            traitor_memories = [
+                m
+                for m in traitor.memory.split("\n--- SECRET TRAITOR MEETING")
+                if "ROUND" in m
+            ]
             if traitor_memories:
                 most_recent = traitor_memories[-1]
                 consensus_targets.append(most_recent)
-        
+
         consensus_summary = ""
         if consensus_targets:
-            consensus_summary = "Based on your secret meeting, you discussed potential targets. "
-            consensus_summary += "Now you must make the final decision on who to eliminate."
+            consensus_summary = (
+                "Based on your secret meeting, you discussed potential targets. "
+            )
+            consensus_summary += (
+                "Now you must make the final decision on who to eliminate."
+            )
 
         votes = {}
         votes_list = []
-        
+
         # Create a more strategic prompt for the final vote
         for traitor in traitors:
             # Create a personalized prompt for each traitor's vote
@@ -736,7 +649,7 @@ class TraitorsGame:
                 "This is the moment to act. Your vote will determine which Faithful is eliminated tonight. "
                 "Choose strategically to advance the Traitors' position in the game."
             )
-            
+
             # Override the standard process_vote with our custom prompt
             traitor.set_prompt(
                 f"Based on all discussions and your memory:\n{traitor.memory}\n\n"
@@ -744,17 +657,19 @@ class TraitorsGame:
                 f"The active Faithfuls are: {', '.join(str(a.id) for a in active_faithfuls)}.\n"
                 "Who are you voting to eliminate? Respond with ONLY the player number."
             )
-            
+
             vote_response = self.call_llm(traitor)
-            
+
             # Extract just the number from the response
             vote_match = re.search(r"\d+", vote_response)
-            
+
             if vote_match:
                 vote = vote_match.group()
                 votes[vote] = votes.get(vote, 0) + 1
-                self.write_to_history(f"Traitor {traitor.id} votes to eliminate Player {vote}")
-                
+                self.write_to_history(
+                    f"Traitor {traitor.id} votes to eliminate Player {vote}"
+                )
+
                 # Add the vote to the list
                 votes_list.append(
                     {
@@ -770,7 +685,7 @@ class TraitorsGame:
                 self.write_to_history(
                     f"Traitor {traitor.id} cast an invalid vote: {vote_response}"
                 )
-                
+
                 # Add the invalid vote to the list
                 votes_list.append(
                     {
@@ -792,7 +707,7 @@ class TraitorsGame:
         eliminated_agent = next(
             (a for a in active_faithfuls if str(a.id) == eliminated_id), None
         )
-        
+
         # Add a strategic reflection for traitors after the elimination
         if eliminated_agent:
             for traitor in traitors:
@@ -801,7 +716,9 @@ class TraitorsGame:
                     "Remember to act surprised when this is announced to all players. "
                     "Consider how you might use this elimination to your advantage in discussions."
                 )
-                traitor.add_to_memory(strategic_note, f"TRAITOR ELIMINATION (ROUND {self.round_number})")
+                traitor.add_to_memory(
+                    strategic_note, f"TRAITOR ELIMINATION (ROUND {self.round_number})"
+                )
 
         self.process_elimination(eliminated_id, eliminated_agent, votes_list, "traitor")
 
@@ -842,35 +759,36 @@ class TraitorsGame:
         for agent in self.agents:
             if agent.traits:
                 # Determine how to refer to the agent
-                gender_pronoun = agent.traits.get('gender_pronoun', '').lower()
-                if gender_pronoun in ['he', 'she']:
+                gender_pronoun = agent.traits.get("gender_pronoun", "").lower()
+                if gender_pronoun in ["he", "she"]:
                     subject = gender_pronoun.capitalize()
                     possessive = "his" if gender_pronoun == "he" else "her"
                 else:
                     subject = f"Player {agent.id}"
-                    possessive = "their"
 
                 # Build the introduction
                 intro = f"Player {agent.id} is a {agent.traits.get('age')}-year-old "
                 intro += f"{agent.traits.get('nationality')} {agent.traits.get('profession')}. "
                 intro += f"{subject} is {agent.traits.get('ethnicity')} and {agent.traits.get('civil_status')}. "
-                
-                children = agent.traits.get('children', 0)
+
+                children = agent.traits.get("children", 0)
                 if children == 0:
                     intro += f"{subject} has no children."
                 elif children == 1:
                     intro += f"{subject} has one child."
                 else:
                     intro += f"{subject} has {children} children."
-                    
+
                 self.write_to_history(intro)
                 introductions.append(intro)
 
         # If there are no introductions, write a message to the history and return
         if not introductions:
-            self.write_to_history("No introductions were provided. Skipping introduction phase.")
+            self.write_to_history(
+                "No introductions were provided. Skipping introduction phase."
+            )
             return
-        
+
         # Add a note about players without introductions
         players_without_traits = [str(a.id) for a in self.agents if not a.traits]
         if players_without_traits:
@@ -881,19 +799,16 @@ class TraitorsGame:
         # Have each agent process and remember the introductions
         all_introductions = "\n".join(introductions)
         for agent in self.agents:
-            agent.set_prompt(
-                f"These are the introductions of all players:\n{all_introductions}\n\n"
-                "As your character, what do you find most interesting or noteworthy about the other players? "
-                "What information might be useful to remember? "
-                "Consider their professions, backgrounds, and any potential connections or suspicions."
-            )
+            # Use prompt manager for introduction processing prompt
+            agent.set_prompt(PromptManager.get_introduction_prompt(all_introductions))
+
             memory_response = self.call_llm(agent)
-            agent.add_to_memory(
-                f"MY THOUGHTS ON PLAYERS BACKGROUNDS:\n{memory_response}",
-            )
-        
+            agent.add_to_memory(memory_response, "THOUGHTS ON PLAYERS BACKGROUNDS")
+
         # Add a small break before starting the game
-        self.write_to_history("\nNow that we know each other, let the game begin!", new_section=True)
+        self.write_to_history(
+            "\nNow that we know each other, let the game begin!", new_section=True
+        )
 
     def run(self):
         """Main game loop."""
@@ -909,14 +824,18 @@ class TraitorsGame:
 
         self.write_to_history(
             f"Using client: {self.config['llm']['client_type']}"
-            + (f" with provider: {self.config['llm'].get('provider')}" if self.config['llm'].get('provider') else "")
+            + (
+                f" with provider: {self.config['llm'].get('provider')}"
+                if self.config["llm"].get("provider")
+                else ""
+            )
         )
         self.write_to_history(f"Model: {self.config['llm']['model']}")
 
         try:
             # Add introduction phase before the main game loop
             self.introduction_phase()
-            
+
             while not self.game_over:
                 self.discussion_phase()
                 self.voting_phase()

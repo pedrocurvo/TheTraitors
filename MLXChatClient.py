@@ -1,4 +1,4 @@
-from mlx_lm import load, generate
+from mlx_lm import generate, load
 
 
 class MLXChatClient:
