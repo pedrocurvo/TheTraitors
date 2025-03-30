@@ -106,6 +106,7 @@ if __name__ == "__main__":
             client_type=config["llm"]["client_type"],
             provider=config["llm"].get("provider"),
             experiment_name=config["game"].get("experiment_name"),
+            use_interface=True,
         )
         game.run()
         game.post_game_analysis()

@@ -7,53 +7,126 @@ import pandas as pd
 
 def compute_traitors_game_metrics(csv_file=None, df=None):
     """
-    Compute various metrics for a Traitors game.
+    Computes various metrics for The Traitors game based on voting data stored in a CSV file.
 
-    Args:
-        csv_file (str, optional): Path to the votes CSV file
+    Parameters:
+        csv_file (str): Path to the CSV file containing voting data.
         df (DataFrame, optional): Pre-loaded DataFrame with vote data
 
     Returns:
-        dict: Dictionary of computed metrics
+        dict: A dictionary containing the computed metrics.
     """
     if df is None:
         if csv_file is None:
             raise ValueError("Either csv_file or df must be provided")
         df = pd.read_csv(csv_file)
 
-    metrics = {}
+    # Get traitors and faithfuls
+    traitors = df[df["Role"] == "Traitor"]["Player_ID"].unique()
+    faithfuls = df[df["Role"] == "Faithful"]["Player_ID"].unique()
 
-    # Calculate basic metrics
-    metrics["total_rounds"] = df["Round"].max()
-    metrics["total_votes"] = len(df)
-    metrics["valid_votes"] = len(df[df["Vote_Target"].notna()])
+    # Traitor Agreement Score (TAS)
+    tas_r = (
+        df[df["Vote_Type"] == "Traitor"]
+        .groupby("Round")["Vote_Target"]
+        .apply(lambda x: x.value_counts().max() / len(x))
+    )
+    tas = tas_r.mean()
 
-    # Calculate role-specific metrics
-    traitor_votes = df[df["Role"] == "Traitor"]
-    faithful_votes = df[df["Role"] == "Faithful"]
+    # Faithful Agreement Score (FAS)
+    fas_r = (
+        df[(df["Vote_Type"] == "General") & (df["Role"] == "Faithful")]
+        .groupby("Round")["Vote_Target"]
+        .apply(lambda x: x.value_counts().max() / len(x))
+    )
+    fas = fas_r.mean()
 
-    metrics["traitor_votes"] = len(traitor_votes)
-    metrics["faithful_votes"] = len(faithful_votes)
+    # Faithful Correctness Rate (FCR)
+    fcr_r = (
+        df[(df["Vote_Type"] == "General") & (df["Role"] == "Faithful")]
+        .groupby("Round")["Vote_Target"]
+        .apply(lambda x: (x.isin(traitors)).sum() / len(x))
+    )
+    fcr = fcr_r.mean()
 
-    # Calculate voting accuracy (how often faithfuls voted for traitors)
-    traitor_targets = df[
-        (df["Role"] == "Faithful")
-        & (df["Vote_Type"] == "General")
-        & (df["Vote_Target"].notna())
-    ]
+    # Traitor Survival Rate (TSR)
+    initial_traitors = len(traitors)
+    eliminated_traitors = df[df["Eliminated"].isin(traitors)]["Eliminated"].nunique()
+    tsr = (
+        (initial_traitors - eliminated_traitors) / initial_traitors
+        if initial_traitors > 0
+        else 0
+    )
 
-    # Get info about traitor IDs from the data
-    traitor_ids = set(df[df["Role"] == "Traitor"]["Player_ID"].unique())
+    # Faithful Survival Rate (FSR)
+    initial_faithfuls = len(faithfuls)
+    eliminated_faithfuls = df[df["Eliminated"].isin(faithfuls)]["Eliminated"].nunique()
+    fsr = (
+        (initial_faithfuls - eliminated_faithfuls) / initial_faithfuls
+        if initial_faithfuls > 0
+        else 0
+    )
 
-    # Calculate how many faithful votes correctly targeted traitors
-    correct_votes = traitor_targets[
-        traitor_targets["Vote_Target"].astype(str).isin([str(i) for i in traitor_ids])
-    ]
+    # Deception Effectiveness Score (DES)
+    def deception_success(group):
+        eliminated_player = group["Eliminated"].iloc[0]
+        return (
+            all(group["Vote_Target"] == eliminated_player)
+            and eliminated_player in faithfuls
+        )
 
-    if len(traitor_targets) > 0:
-        metrics["faithful_accuracy"] = len(correct_votes) / len(traitor_targets)
-    else:
-        metrics["faithful_accuracy"] = 0
+    des_r = df[df["Vote_Type"] == "Traitor"].groupby("Round").apply(deception_success)
+    des = des_r.mean()
+
+    # Information Diffusion Rate (IDR)
+    idr_r = (
+        df[(df["Vote_Type"] == "General") & (df["Role"] == "Faithful")]
+        .groupby("Round")["Vote_Target"]
+        .apply(lambda x: (x.isin(traitors)).sum() / len(x))
+    )
+    idr = idr_r.mean()
+
+    # Betrayal Recognition Rate (BRR)
+    def betrayal_recognition(group):
+        traitor_votes = group[group["Vote_Target"].isin(traitors)]
+        max_voted = group["Vote_Target"].value_counts().idxmax()
+        return (
+            (traitor_votes["Vote_Target"] != max_voted).sum() / len(traitor_votes)
+            if len(traitor_votes) > 0
+            else 0
+        )
+
+    brr_r = (
+        df[(df["Vote_Type"] == "General") & (df["Role"] == "Faithful")]
+        .groupby("Round")
+        .apply(betrayal_recognition)
+    )
+    brr = brr_r.mean()
+
+    # Vote Switching Frequency (VSF)
+    df["Prev_Vote"] = df.groupby("Player_ID")["Vote_Target"].shift(1)
+    df["Vote_Changed"] = df["Vote_Target"] != df["Prev_Vote"]
+    vsf_r = df.groupby("Round")["Vote_Changed"].mean()
+    vsf = vsf_r.mean()
+
+    # Trust Network Stability (TNS)
+    tns_r = df.groupby("Round")["Vote_Changed"].apply(lambda x: 1 - x.mean())
+    tns = tns_r.mean()
+
+    # Calculate basic metrics that were also in the newer version
+    metrics = {
+        "total_rounds": df["Round"].max(),
+        "total_votes": len(df),
+        "valid_votes": len(df[df["Vote_Target"].notna()]),
+        "traitor_votes": len(df[df["Role"] == "Traitor"]),
+        "faithful_votes": len(df[df["Role"] == "Faithful"]),
+        "faithful_accuracy": (
+            len(df[(df["Role"] == "Faithful") & df["Vote_Target"].isin(traitors)])
+            / len(df[df["Role"] == "Faithful"])
+            if len(df[df["Role"] == "Faithful"]) > 0
+            else 0
+        ),
+    }
 
     # Calculate elimination metrics
     eliminations = df[df["Eliminated"] != False].drop_duplicates(subset=["Eliminated"])
@@ -61,22 +134,34 @@ def compute_traitors_game_metrics(csv_file=None, df=None):
 
     # Calculate who won
     if "Eliminated" in df.columns:
-        # Get the IDs of all eliminated players
         eliminated_ids = df[df["Eliminated"] != False]["Eliminated"].unique()
-
-        # Count traitors and faithfuls eliminated
-        traitor_eliminations = sum(1 for e_id in eliminated_ids if e_id in traitor_ids)
+        traitor_eliminations = sum(1 for e_id in eliminated_ids if e_id in traitors)
         faithful_eliminations = len(eliminated_ids) - traitor_eliminations
 
         metrics["traitors_eliminated"] = traitor_eliminations
         metrics["faithfuls_eliminated"] = faithful_eliminations
 
-        # Determine winner (if possible)
-        if traitor_eliminations == len(traitor_ids):
+        if traitor_eliminations == len(traitors):
             metrics["winner"] = "Faithfuls"
-        elif faithful_eliminations >= len(traitor_ids):
+        elif faithful_eliminations >= len(traitors):
             metrics["winner"] = "Traitors"
         else:
             metrics["winner"] = "Unknown/Incomplete"
+
+    # Add the detailed metrics
+    metrics.update(
+        {
+            "Traitor Agreement Score (TAS)": round(tas, 3),
+            "Faithful Agreement Score (FAS)": round(fas, 3),
+            "Faithful Correctness Rate (FCR)": round(fcr, 3),
+            "Traitor Survival Rate (TSR)": round(tsr, 3),
+            "Faithful Survival Rate (FSR)": round(fsr, 3),
+            "Deception Effectiveness Score (DES)": round(des, 3),
+            "Information Diffusion Rate (IDR)": round(idr, 3),
+            "Betrayal Recognition Rate (BRR)": round(brr, 3),
+            "Vote Switching Frequency (VSF)": round(vsf, 3),
+            "Trust Network Stability (TNS)": round(tns, 3),
+        }
+    )
 
     return metrics

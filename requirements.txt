@@ -5,10 +5,12 @@ pyyaml>=6.0
 numpy>=1.24.0
 pandas>=2.0.0
 
+# UI
+gradio>=4.13.0
+
 # Optional LLM providers
-# Uncomment as needed
-# mlx-lm>=0.0.3  # For MLX support
-# huggingface_hub>=0.19.0  # For Hugging Face support
+transformers>=4.35.0
+huggingface-hub>=0.19.0
 
 # Development dependencies
 pytest>=7.4.0

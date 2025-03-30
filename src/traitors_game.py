@@ -1,14 +1,18 @@
 import os
 import random
 import re
+import threading
 import time
 from pathlib import Path
 
+# Add gradio import
+import gradio as gr
+
 # Update imports to use modules from src
-from src.agent import Agent
-from src.llm_client import LLMClientFactory
-from src.prompt_manager import PromptManager
-from src.utils import compute_traitors_game_metrics
+from .agent import Agent
+from .llm_client import LLMClientFactory
+from .prompt_manager import PromptManager
+from .utils.metrics import compute_traitors_game_metrics
 
 
 class TraitorsGame:
@@ -22,6 +26,7 @@ class TraitorsGame:
         client_type="openai",
         provider=None,
         experiment_name=None,
+        use_interface=False,
     ):
         """
         Initialize the Traitors Game.
@@ -35,9 +40,30 @@ class TraitorsGame:
             client_type: Default type of client to use ("openai", "hf")
             provider: Default provider for HF client
             experiment_name: Optional name for the experiment
+            use_interface: Whether to use the Gradio interface
         """
         # Store the configuration
         self.config = config
+
+        # Token tracking attributes
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
+        self.token_usage_by_agent = {}
+        self.token_usage_by_phase = {
+            "discussion": {"input": 0, "output": 0},
+            "voting": {"input": 0, "output": 0},
+            "traitor_discussion": {"input": 0, "output": 0},
+            "traitor_elimination": {"input": 0, "output": 0},
+            "introduction": {"input": 0, "output": 0},
+            "post_elimination": {"input": 0, "output": 0},
+        }
+        self.current_phase = None
+
+        # Gradio interface attributes
+        self.use_interface = use_interface
+        self.interface = None
+        self.chat_history = []
+        self.interface_ready = threading.Event()
 
         # Create the results folder
         Path("results").mkdir(parents=True, exist_ok=True)
@@ -92,6 +118,47 @@ class TraitorsGame:
         self.VOTING_FILE = f"{self.RESULTS_DIR}/votes.csv"
         with open(self.VOTING_FILE, "w") as f:
             f.write("Round,Vote_Type,Player_ID,Role,Vote_Target,Eliminated\n")
+
+    def set_current_phase(self, phase):
+        """Set the current game phase for token tracking."""
+        self.current_phase = phase
+
+    def get_token_usage_stats(self):
+        """Return statistics about token usage."""
+        return {
+            "total": {
+                "input": self.total_input_tokens,
+                "output": self.total_output_tokens,
+                "combined": self.total_input_tokens + self.total_output_tokens,
+            },
+            "by_agent": self.token_usage_by_agent,
+            "by_phase": self.token_usage_by_phase,
+        }
+
+    def write_token_usage_to_file(self):
+        """Write token usage statistics to a file."""
+        stats = self.get_token_usage_stats()
+        with open(f"{self.RESULTS_DIR}/token_usage.txt", "w") as f:
+            f.write("TOKEN USAGE STATISTICS\n")
+            f.write("======================\n\n")
+
+            f.write(f"Total Input Tokens: {stats['total']['input']}\n")
+            f.write(f"Total Output Tokens: {stats['total']['output']}\n")
+            f.write(f"Total Combined Tokens: {stats['total']['combined']}\n\n")
+
+            f.write("TOKEN USAGE BY PHASE\n")
+            f.write("===================\n")
+            for phase, usage in stats["by_phase"].items():
+                f.write(
+                    f"{phase.title()}: {usage['input']} input, {usage['output']} output\n"
+                )
+
+            f.write("\nTOKEN USAGE BY AGENT\n")
+            f.write("===================\n")
+            for agent_id, usage in stats["by_agent"].items():
+                f.write(
+                    f"Agent {agent_id}: {usage['input']} input, {usage['output']} output\n"
+                )
 
     def write_config_file(
         self, agent_count, traitor_count, model, seed, client_type, provider
@@ -234,7 +301,36 @@ class TraitorsGame:
 
         try:
             # Use the agent's own LLM client to generate a response
-            return agent.call_llm(formatted_prompt)
+            response = agent.call_llm(formatted_prompt)
+
+            # Track token usage if available from the LLM client
+            if hasattr(agent.llm_client, "last_token_count"):
+                input_tokens = agent.llm_client.last_token_count.get("input", 0)
+                output_tokens = agent.llm_client.last_token_count.get("output", 0)
+
+                # Update total counts
+                self.total_input_tokens += input_tokens
+                self.total_output_tokens += output_tokens
+
+                # Update agent-specific counts
+                if agent.id not in self.token_usage_by_agent:
+                    self.token_usage_by_agent[agent.id] = {"input": 0, "output": 0}
+                self.token_usage_by_agent[agent.id]["input"] += input_tokens
+                self.token_usage_by_agent[agent.id]["output"] += output_tokens
+
+                # Update phase-specific counts if a phase is currently active
+                if (
+                    self.current_phase
+                    and self.current_phase in self.token_usage_by_phase
+                ):
+                    self.token_usage_by_phase[self.current_phase][
+                        "input"
+                    ] += input_tokens
+                    self.token_usage_by_phase[self.current_phase][
+                        "output"
+                    ] += output_tokens
+
+            return response
         except Exception as e:
             print(f"Error calling the LLM API: {e}")
             with open(self.HISTORY_FILE, "a") as f:
@@ -264,8 +360,91 @@ class TraitorsGame:
         with open(self.HISTORY_FILE, "a") as f:
             print(message, file=f)
 
+        # Update the Gradio interface if it's enabled
+        if self.use_interface and self.interface_ready.is_set():
+            if new_section:
+                # For section headers, use a distinct format
+                self.chat_history.append(("System", f"**{message.strip('- ')}**"))
+            else:
+                # Use a regular message format
+                sender = "System"
+                if message.startswith("Player ") and ":" in message:
+                    # Extract player ID for player messages
+                    parts = message.split(":", 1)
+                    sender = parts[0].strip()
+                    message = parts[1].strip() if len(parts) > 1 else ""
+                self.chat_history.append((sender, message))
+
+    def initialize_interface(self):
+        """Initialize a simple Gradio interface for the game."""
+        with gr.Blocks(title="The Traitors Game") as interface:
+            gr.Markdown("# The Traitors Game")
+
+            with gr.Row():
+                with gr.Column(scale=3):
+                    # Simple chat component to display messages
+                    chatbot = gr.Chatbot(
+                        value=self.chat_history,
+                        height=600,
+                        avatar_images=("🎲", "🎭"),
+                        render=True,
+                    )
+
+                with gr.Column(scale=1):
+                    # Simple game status display
+                    game_info = gr.Markdown("### Game Status\nLoading game...")
+
+            # Manual refresh button
+            refresh_btn = gr.Button("Refresh Display")
+
+            # Function to update the display
+            def refresh_display():
+                # Update game status information
+                active_agents = [a for a in self.agents if not a.is_eliminated()]
+                faithfuls = sum(1 for a in active_agents if a.is_faithful())
+                traitors = sum(1 for a in active_agents if a.is_traitor())
+
+                status = f"### Game Status\n**Round:** {self.round_number}\n"
+                status += f"**Active Players:** {len(active_agents)}\n"
+                status += f"**Faithfuls Remaining:** {faithfuls}\n"
+                status += f"**Traitors Remaining:** {traitors}\n\n"
+
+                status += "### Players\n"
+                for agent in self.agents:
+                    status_icon = "🟢" if not agent.is_eliminated() else "❌"
+                    role = f"({agent.role})" if self.game_over else ""
+                    status += f"{status_icon} Player {agent.id} {role}\n"
+
+                return self.chat_history, status
+
+            # Connect the refresh button to the refresh function
+            refresh_btn.click(fn=refresh_display, outputs=[chatbot, game_info])
+
+            # Store the chatbot reference to update it from write_to_history
+            self.interface = chatbot
+            self.interface_ready.set()
+
+        return interface
+
+    def run_with_interface(self):
+        """Run the game with the Gradio interface."""
+        # Initialize interface
+        interface = self.initialize_interface()
+
+        # Start the game in a separate thread so the interface remains responsive
+        game_thread = threading.Thread(target=self.run)
+        game_thread.daemon = True
+        game_thread.start()
+
+        # Launch the interface
+        interface.launch(share=True)
+
+        # Wait for the game to complete
+        game_thread.join()
+
     def discussion_phase(self):
         """Agents communicate and discuss who to vote out."""
+        self.set_current_phase("discussion")
         self.write_to_history(
             f"DISCUSSION PHASE (ROUND {self.round_number})", new_section=True
         )
@@ -457,6 +636,7 @@ class TraitorsGame:
 
     def voting_phase(self):
         """Agents vote to eliminate a player."""
+        self.set_current_phase("voting")
         self.write_to_history(
             f"VOTING PHASE (ROUND {self.round_number})", new_section=True
         )
@@ -482,6 +662,7 @@ class TraitorsGame:
 
     def post_elimination_discussion(self, eliminated):
         """Allow agents to discuss after elimination is revealed."""
+        self.set_current_phase("post_elimination")
         self.write_to_history("POST-ELIMINATION DISCUSSION", new_section=True)
         eliminated_agent = next(
             (a for a in self.agents if str(a.id) == eliminated), None
@@ -521,6 +702,7 @@ class TraitorsGame:
 
     def traitor_discussion_phase(self):
         """Traitors secretly discuss who to eliminate."""
+        self.set_current_phase("traitor_discussion")
         self.write_to_history("TRAITOR DISCUSSION PHASE", new_section=True)
         traitors = [
             agent
@@ -602,6 +784,7 @@ class TraitorsGame:
 
     def traitor_elimination_phase(self, traitors, active_faithfuls):
         """Traitors vote to eliminate a Faithful."""
+        self.set_current_phase("traitor_elimination")
         self.write_to_history("TRAITOR ELIMINATION PHASE", new_section=True)
 
         if not traitors or not active_faithfuls:
@@ -618,15 +801,34 @@ class TraitorsGame:
         # Get the consensus from the previous discussion
         consensus_targets = []
         for traitor in traitors:
-            # Extract the most recent traitor meeting memory
-            traitor_memories = [
-                m
-                for m in traitor.memory.split("\n--- SECRET TRAITOR MEETING")
-                if "ROUND" in m
-            ]
-            if traitor_memories:
-                most_recent = traitor_memories[-1]
-                consensus_targets.append(most_recent)
+            # Access secret traitor meeting information from the agent's structured memory
+            # Using the proper memory structure from the Agent class
+            traitor_meeting_notes = []
+
+            # Check memory structure and extract relevant information about traitor meetings
+            if isinstance(traitor.memory, dict):
+                # Check for traitor meeting info in game_events
+                for event in traitor.memory.get("game_events", []):
+                    if isinstance(event, dict) and "SECRET TRAITOR MEETING" in str(
+                        event.get("details", "")
+                    ):
+                        traitor_meeting_notes.append(event.get("details", ""))
+
+                # Also check in personal_notes
+                for note in traitor.memory.get("personal_notes", []):
+                    if "SECRET TRAITOR MEETING" in str(note):
+                        traitor_meeting_notes.append(note)
+
+                # Check round summaries
+                for round_data in traitor.memory.get("round_summaries", {}).values():
+                    if isinstance(round_data, dict) and "SECRET TRAITOR MEETING" in str(
+                        round_data.get("summary", "")
+                    ):
+                        traitor_meeting_notes.append(round_data.get("summary", ""))
+
+            # If we found any traitor meeting notes, add the most recent one
+            if traitor_meeting_notes:
+                consensus_targets.append(traitor_meeting_notes[-1])
 
         consensus_summary = ""
         if consensus_targets:
@@ -751,6 +953,7 @@ class TraitorsGame:
 
     def introduction_phase(self):
         """Introduce agents with their traits to the game."""
+        self.set_current_phase("introduction")
         self.write_to_history("INTRODUCTION PHASE", new_section=True)
         self.write_to_history("Let's meet our players!")
 
@@ -877,10 +1080,17 @@ class TraitorsGame:
                 )
             )
 
+            # Run post-game analysis
+            self.post_game_analysis()
+
         except KeyboardInterrupt:
             self.write_to_history("Game interrupted by user.")
+            # Still write token usage even if interrupted
+            self.write_token_usage_to_file()
         except Exception as e:
             self.write_to_history(f"Game error: {e}")
+            # Still write token usage even if there's an error
+            self.write_token_usage_to_file()
 
     def post_game_analysis(self):
         """Compute game metrics and write to a file."""
@@ -888,3 +1098,13 @@ class TraitorsGame:
         with open(f"{self.RESULTS_DIR}/metrics.txt", "w") as f:
             for key, value in metrics.items():
                 f.write(f"{key}: {value}\n")
+
+        # Write token usage statistics
+        self.write_token_usage_to_file()
+
+        # Add token usage summary to history
+        stats = self.get_token_usage_stats()
+        self.write_to_history("TOKEN USAGE SUMMARY", new_section=True)
+        self.write_to_history(f"Total Input Tokens: {stats['total']['input']}")
+        self.write_to_history(f"Total Output Tokens: {stats['total']['output']}")
+        self.write_to_history(f"Total Combined Tokens: {stats['total']['combined']}")
