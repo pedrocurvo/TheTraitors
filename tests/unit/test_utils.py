@@ -5,7 +5,7 @@ from unittest import mock
 
 import pandas as pd
 
-from utils import compute_traitors_game_metrics
+from utils.metrics import compute_traitors_game_metrics
 
 
 class TestUtils(unittest.TestCase):

@@ -187,7 +187,7 @@ class TestAgent(unittest.TestCase):
         self.assertIn("--- PERSONAL NOTES ---", formatted)
         self.assertIn("Important observation", formatted)
 
-    @mock.patch("agent.Agent.log_inner_thoughts")
+    @mock.patch("src.agent.Agent.log_inner_thoughts")
     def test_call_llm(self, mock_log, mock_pm):
         """Test LLM calling with structured prompts."""
         # Mock the get_system_prompt method
