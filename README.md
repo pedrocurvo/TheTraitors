@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-	<img src="https://img.shields.io/github/license/pedrocurvo/TheTraitors?style=default&logo=opensourceinitiative&logoColor=white&color=0080ff" alt="license">
+	<img src="https://img.shields.io/github/license/pedrocurvo/TheTraitors" alt="license">
 	<img src="https://img.shields.io/badge/python-3.8%2B-blue" alt="python-version">
 	<img src="https://img.shields.io/badge/LLM-GPT--4,%20DeepSeek,%20more-blue" alt="supported-models">
 </p>
