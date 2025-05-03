@@ -96,15 +96,18 @@ The Agent class represents a player in the game.
 .. code-block:: python
 
    class Agent:
-       def __init__(self, id, role, model, results_dir, traits=None):
+       def __init__(
+           self, agent_id, role, model, results_dir, llm_client=None, traits=None
+       ):
            """
            Initialize an Agent.
            
            Args:
-               id: Unique identifier for the agent
+               agent_id: Unique identifier for the agent
                role: Either "Traitor" or "Faithful"
                model: The LLM model to use for this agent
                results_dir: Directory to save agent outputs
+               llm_client: The LLM client to use for this agent
                traits: Optional dictionary of agent traits (age, profession, etc.)
            """
 
@@ -113,9 +116,14 @@ Key Methods
 
 .. code-block:: python
 
-   def set_llm_client(self, client):
+   def set_llm_client(self, llm_client):
        """
        Set the LLM client for this agent.
+       """
+
+   def call_llm(self, user_prompt):
+       """
+       Call the LLM client to generate a response based on system and user prompts.
        """
 
    def set_fellow_traitors(self, traitor_ids):
@@ -123,19 +131,14 @@ Key Methods
        Provide a list of fellow traitor IDs to this agent (only for traitors).
        """
 
-   def set_prompt(self, prompt):
+   def add_to_memory(self, content, section=None):
        """
-       Set the current prompt for the agent.
-       """
-
-   def add_to_memory(self, content, label=None):
-       """
-       Add content to the agent's memory, optionally with a label.
+       Add content to the agent's structured memory system with categorization.
        """
 
-   def call_llm(self, prompt):
+   def get_formatted_memory(self):
        """
-       Call the LLM client to generate a response.
+       Format the structured memory into a string for the LLM prompt.
        """
 
    def is_traitor(self):
@@ -148,6 +151,11 @@ Key Methods
        Return True if the agent is faithful, False otherwise.
        """
 
+   def is_active(self):
+       """
+       Check if the agent is still active in the game.
+       """
+
    def is_eliminated(self):
        """
        Return True if the agent has been eliminated, False otherwise.
@@ -158,10 +166,53 @@ Key Methods
        Mark the agent as eliminated.
        """
 
+   def extract_dialogue(self, full_response):
+       """
+       Extract dialogue from between triple dashes in the response.
+       """
+
+   def to_dict(self):
+       """
+       Convert the agent to a dictionary representation.
+       """
+
+   @classmethod
+   def from_dict(cls, data, results_dir, llm_client=None):
+       """
+       Create an Agent instance from a dictionary.
+       """
+
 LLM Clients
 ----------
 
 The framework includes several LLM client implementations for different providers.
+
+LLMClient Base Class
+^^^^^^^^^^^^^^^
+
+.. code-block:: python
+
+   class LLMClient(ABC):
+       def __init__(self, model):
+           """
+           Initialize the LLM client.
+           
+           Args:
+               model: The model name to use for API calls
+           """
+           
+       @abstractmethod
+       def call(self, system_message, user_message):
+           """
+           Call the LLM API with the given messages.
+           
+           Args:
+               system_message: The system message to send
+               user_message: The user message to send
+               
+           Returns:
+               The LLM's response text
+           """
 
 LLMClientFactory
 ^^^^^^^^^^^^^^^
@@ -188,22 +239,24 @@ OpenAIClient
 
 .. code-block:: python
 
-   class OpenAIClient:
-       def __init__(self, model, provider=None):
+   class OpenAIClient(LLMClient):
+       def __init__(self, model, api_key, base_url=None):
            """
            Initialize an OpenAI-compatible client.
            
            Args:
                model: Model name to use
-               provider: Provider name ("openai", "deepseek", "together")
+               api_key: The API key for authentication
+               base_url: Optional base URL for the API (for compatible providers)
            """
            
-       def call(self, prompt):
+       def call(self, system_message, user_message):
            """
-           Call the OpenAI-compatible API with the given prompt.
+           Call the OpenAI-compatible API with the given messages.
            
            Args:
-               prompt: The prompt to send to the API
+               system_message: The system message to send
+               user_message: The user message to send
                
            Returns:
                The generated text response
@@ -214,21 +267,24 @@ HuggingFaceClient
 
 .. code-block:: python
 
-   class HuggingFaceClient:
-       def __init__(self, model):
+   class HuggingFaceClient(LLMClient):
+       def __init__(self, model, provider=None, api_key=None):
            """
            Initialize a Hugging Face Inference API client.
            
            Args:
-               model: The model name to use on Hugging Face
+               model: The model name to use
+               provider: Optional provider name (e.g., 'together')
+               api_key: API key for authentication
            """
            
-       def call(self, prompt):
+       def call(self, system_message, user_message):
            """
-           Call the Hugging Face Inference API with the given prompt.
+           Call the Hugging Face API with the given messages.
            
            Args:
-               prompt: The prompt to send to the API
+               system_message: The system message to send
+               user_message: The user message to send
                
            Returns:
                The generated text response
@@ -239,7 +295,7 @@ MLXClient
 
 .. code-block:: python
 
-   class MLXClient:
+   class MLXClient(LLMClient):
        def __init__(self, model):
            """
            Initialize an MLX-based client for local model inference.
@@ -248,15 +304,35 @@ MLXClient
                model: The MLX-compatible model name to load
            """
            
-       def call(self, prompt):
+       def call(self, system_message, user_message):
            """
            Generate a response using a local MLX model.
            
            Args:
-               prompt: The prompt to send to the model
+               system_message: The system message to send
+               user_message: The user message to send
                
            Returns:
                The generated text response
+           """
+
+PromptManager
+-----------
+
+.. code-block:: python
+
+   class PromptManager:
+       @staticmethod
+       def get_system_prompt(agent, memory_content):
+           """
+           Get the system prompt for an agent based on their role and memory.
+           
+           Args:
+               agent: The agent instance
+               memory_content: The formatted memory content
+               
+           Returns:
+               The constructed system prompt
            """
 
 Utility Functions
