@@ -157,3 +157,6 @@ cython_debug/
 
 results/*
 cursor/*
+.DS_Store
+.vscode/
+.cursor/
